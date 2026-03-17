@@ -1,7 +1,5 @@
 from agent import agent
 
-THREAD_CONFIG = {"configurable": {"thread_id": "session-1"}}
-
 
 def main():
     print("Research Agent (type 'exit' to quit)")
@@ -21,26 +19,8 @@ def main():
             print("Goodbye!")
             break
 
-        for chunk in agent.stream(
-            {"messages": [("user", user_input)]},
-            config=THREAD_CONFIG,
-        ):
-            # Tool execution updates
-            if "tools" in chunk:
-                for msg in chunk["tools"].get("messages", []):
-                    tool_name = getattr(msg, "name", "tool")
-                    print(f"  [{tool_name}] done")
-
-            # Agent (LLM) updates
-            if "agent" in chunk:
-                for msg in chunk["agent"].get("messages", []):
-                    # Show tool calls being made
-                    for tc in getattr(msg, "tool_calls", []):
-                        args_preview = str(tc.get("args", ""))[:80]
-                        print(f"  → {tc['name']}({args_preview})")
-                    # Show final text response
-                    if isinstance(msg.content, str) and msg.content:
-                        print(f"\nAgent: {msg.content}")
+        response = agent.chat(user_input)
+        print(f"\nAgent: {response}")
 
 
 if __name__ == "__main__":
