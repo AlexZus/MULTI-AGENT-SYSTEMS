@@ -4,6 +4,7 @@ import trafilatura
 from ddgs import DDGS
 
 from config import Settings
+import retriever
 
 settings = Settings()
 
@@ -36,6 +37,22 @@ def read_url(url: str) -> str:
         return text
     except Exception as e:
         return f"Error reading {url}: {str(e)}"
+
+
+def knowledge_search(query: str) -> str:
+    """Search the local knowledge base of ingested documents."""
+    try:
+        results = retriever.search(query)
+    except FileNotFoundError as e:
+        return f"Knowledge base not available: {e}"
+    if not results:
+        return "No relevant documents found in the knowledge base."
+    parts = []
+    for i, chunk in enumerate(results, start=1):
+        parts.append(
+            f"[{i}] Source: {chunk['source']}, Page {chunk['page']}\n{chunk['text']}"
+        )
+    return "\n\n---\n\n".join(parts)
 
 
 def write_report(filename: str, content: str) -> str:
@@ -97,6 +114,27 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "knowledge_search",
+            "description": (
+                "Search the local knowledge base of ingested PDF/TXT documents. "
+                "Use this for questions that may be answered by locally stored research papers or documents. "
+                "Returns the most relevant document excerpts with source and page references."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to look up in the knowledge base.",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_report",
             "description": (
                 "Save a Markdown research report to a file in the output directory. "
@@ -125,4 +163,5 @@ TOOL_FUNCTIONS = {
     "web_search": web_search,
     "read_url": read_url,
     "write_report": write_report,
+    "knowledge_search": knowledge_search,
 }
