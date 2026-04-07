@@ -1,4 +1,7 @@
 openai>=1.0.0
+langchain>=1.2.0
+langchain-openai>=1.1.0
+langgraph>=1.1.0
 faiss-cpu
 rank_bm25
 sentence-transformers

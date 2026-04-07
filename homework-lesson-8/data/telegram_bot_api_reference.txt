@@ -1,0 +1,352 @@
+Telegram Bot API Reference (Selected Methods)
+=============================================
+
+Source: https://core.telegram.org/bots/api
+Version: Bot API 7.x (2024-2025)
+
+## Core Concepts
+
+Update: An object representing an incoming update (message, callback, etc.)
+Chat: A private, group, supergroup, or channel
+Message: A text, photo, document, or other message in a chat
+User: A Telegram user or bot account
+
+Update types:
+- message: New incoming message
+- edited_message: An edited message
+- callback_query: A button press in an inline keyboard
+- inline_query: An inline @bot query
+- chosen_inline_result: A chosen inline result
+- pre_checkout_query: Payment checkout
+- poll / poll_answer: Poll updates
+- my_chat_member: Bot's status in a chat changed
+
+## sendMessage
+
+POST /sendMessage
+
+Parameters:
+- chat_id (required): Integer or String — unique chat identifier or @channel_username
+- text (required): String — message text, 1-4096 characters
+- parse_mode: String — "Markdown", "MarkdownV2", or "HTML"
+- reply_markup: InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove | ForceReply
+- reply_parameters: ReplyParameters — reply to specific message
+- disable_notification: Boolean — silent message
+- protect_content: Boolean — prevent forwarding/saving
+
+Example:
+curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
+  -d chat_id=123456789 \
+  -d text="Hello World" \
+  -d parse_mode=HTML
+
+Returns: Message object
+
+## getUpdates (Polling)
+
+GET /getUpdates
+
+Parameters:
+- offset: Integer — update_id of first update to return (for marking processed updates)
+- limit: Integer — 1-100, default 100
+- timeout: Integer — long polling timeout in seconds (0 = short poll)
+- allowed_updates: Array of String — types to receive (["message", "callback_query"])
+
+Notes:
+- Call with offset = last_update_id + 1 to mark updates as processed
+- Long polling: set timeout=30 for efficient polling
+- Cannot use simultaneously with webhook
+
+## setWebhook
+
+POST /setWebhook
+
+Parameters:
+- url (required): String — HTTPS URL for webhook
+- certificate: InputFile — public key certificate for self-signed SSL
+- ip_address: String — fixed IP for webhook delivery
+- max_connections: Integer — 1-100, max simultaneous connections
+- allowed_updates: Array of String — update types to receive
+- drop_pending_updates: Boolean — clear pending updates on set
+- secret_token: String — 1-256 chars, sent in X-Telegram-Bot-Api-Secret-Token header
+
+Response: True on success
+
+## deleteWebhook
+
+POST /deleteWebhook
+
+Parameters:
+- drop_pending_updates: Boolean — clear pending updates
+
+## sendPhoto
+
+POST /sendPhoto
+
+Parameters:
+- chat_id (required): Chat identifier
+- photo (required): InputFile or file_id or URL
+- caption: String — caption, 0-1024 characters
+- parse_mode: String — Markdown, HTML
+- reply_markup: InlineKeyboardMarkup
+
+Supported formats: JPG, PNG, GIF, BMP, WEBP, TIFF, SVG (up to 5MB for photos, 10MB for documents)
+
+## sendDocument
+
+POST /sendDocument
+
+Parameters:
+- chat_id (required): Chat identifier
+- document (required): InputFile or file_id or URL — up to 50MB
+- caption: String — 0-1024 characters
+- thumb/thumbnail: InputFile — document thumbnail
+
+## getFile
+
+GET /getFile?file_id=<ID>
+
+Returns: File object with file_path
+Download URL: https://api.telegram.org/file/bot<token>/<file_path>
+
+## answerCallbackQuery
+
+POST /answerCallbackQuery
+
+Parameters:
+- callback_query_id (required): String — ID from callback_query update
+- text: String — notification text shown to user (0-200 chars)
+- show_alert: Boolean — show as alert popup (vs. toast)
+- url: String — URL to open (for games)
+- cache_time: Integer — cache time in seconds (default 0)
+
+Must be answered within 10 seconds or Telegram shows error to user.
+
+## editMessageText
+
+POST /editMessageText
+
+Parameters:
+- chat_id: Chat identifier (for inline, omit and use inline_message_id)
+- message_id: Integer — message to edit
+- text (required): String — new text
+- parse_mode: String
+- reply_markup: InlineKeyboardMarkup — new keyboard
+
+Cannot edit: messages from other bots, older than 48 hours, without text
+
+## deleteMessage
+
+POST /deleteMessage
+
+Parameters:
+- chat_id (required): Chat identifier
+- message_id (required): Integer — message to delete
+
+Bots can delete:
+- Their own messages
+- Messages in groups if admin with delete_messages permission
+- Messages in channels if admin
+
+## getChatMember
+
+GET /getChatMember
+
+Parameters:
+- chat_id (required): Chat identifier
+- user_id (required): Integer — user to check
+
+Returns: ChatMember with status: "creator", "administrator", "member", "restricted", "left", "kicked"
+
+## banChatMember / unbanChatMember
+
+POST /banChatMember
+
+Parameters:
+- chat_id (required): Chat identifier (must be group/supergroup/channel)
+- user_id (required): Integer
+- until_date: Integer — Unix timestamp for temporary ban
+- revoke_messages: Boolean — delete all user messages
+
+## Inline Keyboard Examples
+
+Simple two-button keyboard:
+```json
+{
+  "inline_keyboard": [
+    [
+      {"text": "Option A", "callback_data": "option_a"},
+      {"text": "Option B", "callback_data": "option_b"}
+    ]
+  ]
+}
+```
+
+URL button:
+```json
+{
+  "inline_keyboard": [[
+    {"text": "Open URL", "url": "https://example.com"}
+  ]]
+}
+```
+
+Web App button (Mini App):
+```json
+{
+  "inline_keyboard": [[
+    {"text": "Open App", "web_app": {"url": "https://your-app.com"}}
+  ]]
+}
+```
+
+## Reply Keyboards
+
+Show persistent keyboard to user:
+```json
+{
+  "keyboard": [
+    [{"text": "Menu"}, {"text": "Help"}],
+    [{"text": "Settings"}]
+  ],
+  "resize_keyboard": true,
+  "one_time_keyboard": false
+}
+```
+
+Request contact:
+```json
+{"keyboard": [[{"text": "Share Contact", "request_contact": true}]]}
+```
+
+Request location:
+```json
+{"keyboard": [[{"text": "Share Location", "request_location": true}]]}
+```
+
+Remove keyboard:
+```json
+{"remove_keyboard": true}
+```
+
+## Bot Permissions (in Groups)
+
+Administrator rights (setChatAdministratorCustomTitle):
+- can_manage_chat
+- can_delete_messages
+- can_manage_video_chats
+- can_restrict_members
+- can_promote_members
+- can_change_info
+- can_invite_users
+- can_pin_messages
+- can_post_messages (channels only)
+- can_edit_messages (channels only)
+
+Default group permissions (setChatPermissions):
+- can_send_messages
+- can_send_audios, can_send_documents, can_send_photos, can_send_videos
+- can_send_polls
+- can_add_web_page_previews
+- can_change_info
+- can_invite_users
+- can_pin_messages
+
+## forwardMessage / copyMessage
+
+forwardMessage: Forwards with "Forwarded from" attribution
+copyMessage: Copies content without attribution (anonymous forward)
+
+Both parameters: chat_id (destination), from_chat_id (source), message_id
+
+## sendChatAction
+
+POST /sendChatAction — Show typing/uploading indicator
+
+Parameters:
+- chat_id (required)
+- action (required): "typing" | "upload_photo" | "record_video" | "upload_video" | "record_voice" | "upload_voice" | "upload_document" | "choose_sticker" | "find_location" | "record_video_note" | "upload_video_note"
+
+Action persists for 5 seconds or until next message is sent. Use for long-running operations.
+
+## Payments API
+
+sendInvoice:
+- title: Product name
+- description: Product description
+- payload: Internal identifier
+- provider_token: Payment provider token (from BotFather)
+- currency: Three-letter currency code (USD, EUR, UAH)
+- prices: Array of LabeledPrice [{label, amount}] — amount in smallest currency unit (cents)
+- photo_url, photo_size: Optional product image
+
+answerPreCheckoutQuery:
+- Must answer within 10 seconds
+- pre_checkout_query_id (required)
+- ok (required): Boolean — approve or reject
+- error_message: String — reason for rejection
+
+## Bot API Limits
+
+Message length: 4096 characters (UTF-8)
+Caption length: 1024 characters
+Photo file size: 10 MB
+Document file size: 50 MB
+Audio/video duration: no hard limit, but 50MB file size limit
+Inline query results: max 50 per response
+Inline query cache time: default 300 seconds
+
+Rate limits:
+- 30 messages/second globally
+- 1 message/second per chat
+- Bulk notifications: max 30 messages to different chats/second
+- On 429: respect retry_after field in response
+
+## Error Codes
+
+400 Bad Request: Invalid parameters
+401 Unauthorized: Invalid token
+403 Forbidden: Bot was blocked by user or lacks permissions
+404 Not Found: Chat or message not found
+409 Conflict: Multiple instances using same token
+420 Flood: Rate limit exceeded (check retry_after)
+500 Internal Server Error: Telegram server error (retry)
+
+## Webhook vs Long Polling Comparison
+
+| Feature | Webhook | Long Polling |
+|---------|---------|-------------|
+| Latency | ~50ms | 1-5 seconds |
+| Server | Requires HTTPS | Any server |
+| SSL | Required | Not needed |
+| Scaling | Easier | Harder |
+| Debugging | Harder | Easier |
+| Best for | Production | Development |
+| Updates missed | Never (if server up) | Never |
+
+## Useful Bot Settings via BotFather
+
+/setdescription — Bot description shown on profile
+/setabouttext — Short description in search
+/setuserpic — Bot profile photo
+/setcommands — Register command list
+/setprivacy — Group privacy mode (enabled: bot only sees commands; disabled: sees all messages)
+/setjoingroups — Allow/deny adding bot to groups
+/setinline — Enable inline mode
+/setinlinefeedback — Inline result feedback percentage
+/setdomain — Allowed domains for login widget
+/setpayments — Payment provider
+/deletebot — Permanently delete bot
+
+## Best Practices Summary
+
+1. Always answer callback queries (answerCallbackQuery) within 10 seconds
+2. Use sendChatAction for operations > 2 seconds
+3. Use parse_mode=HTML rather than Markdown (fewer edge cases)
+4. Escape HTML entities in user content: < → &lt; > → &gt; & → &amp;
+5. Store file_id instead of downloading and re-uploading files
+6. Use deep linking for bot sharing: t.me/yourbot?start=ref_code
+7. Handle all exception types from the Bot API
+8. Set appropriate allowed_updates to reduce unnecessary processing
+9. Use InlineKeyboard for actions, ReplyKeyboard for persistent navigation
+10. Test in Telegram Test Environment before production

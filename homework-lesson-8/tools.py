@@ -2,6 +2,7 @@ import os
 
 import trafilatura
 from ddgs import DDGS
+from langchain.tools import tool
 
 from config import Settings
 import retriever
@@ -11,8 +12,7 @@ settings = Settings()
 
 # ── Tool implementations ───────────────────────────────────────────────────────
 
-def web_search(query: str) -> list[dict]:
-    """Search the internet for information using DuckDuckGo."""
+def _web_search(query: str) -> list[dict]:
     try:
         results = DDGS().text(query, max_results=settings.max_search_results)
         return [
@@ -23,8 +23,7 @@ def web_search(query: str) -> list[dict]:
         return [{"error": f"Search failed: {str(e)}"}]
 
 
-def read_url(url: str) -> str:
-    """Fetch and extract the full text content from a web page URL."""
+def _read_url(url: str) -> str:
     try:
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
@@ -39,8 +38,7 @@ def read_url(url: str) -> str:
         return f"Error reading {url}: {str(e)}"
 
 
-def knowledge_search(query: str) -> str:
-    """Search the local knowledge base of ingested documents."""
+def _knowledge_search(query: str) -> str:
     try:
         results = retriever.search(query)
     except FileNotFoundError as e:
@@ -55,8 +53,7 @@ def knowledge_search(query: str) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def write_report(filename: str, content: str) -> str:
-    """Save a Markdown research report to a file in the output directory."""
+def _save_report(filename: str, content: str) -> str:
     os.makedirs(settings.output_dir, exist_ok=True)
     if not filename.endswith(".md"):
         filename += ".md"
@@ -66,102 +63,48 @@ def write_report(filename: str, content: str) -> str:
     return f"Report saved to {os.path.abspath(path)}"
 
 
-# ── JSON Schema tool definitions for the API ──────────────────────────────────
+# ── LangChain @tool versions ──────────────────────────────────────────────────
 
-TOOLS_SCHEMA = [
-    {
-        "type": "function",
-        "function": {
-            "name": "web_search",
-            "description": (
-                "Search the internet for information using DuckDuckGo. "
-                "Returns a list of results, each with 'title', 'url', and 'snippet' fields. "
-                "Use this to discover relevant sources and get an overview of a topic."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query string.",
-                    }
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_url",
-            "description": (
-                "Fetch and extract the full text content from a web page URL. "
-                "Use this after web_search to read the full content of a promising page. "
-                "Returns the extracted text, truncated to avoid filling the context window."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "The full URL of the web page to fetch.",
-                    }
-                },
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "knowledge_search",
-            "description": (
-                "Search the local knowledge base of ingested PDF/TXT documents. "
-                "Use this for questions that may be answered by locally stored research papers or documents. "
-                "Returns the most relevant document excerpts with source and page references."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query to look up in the knowledge base.",
-                    }
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_report",
-            "description": (
-                "Save a Markdown research report to a file in the output directory. "
-                "Call this when the user asks for a report or when the research is complete."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "filename": {
-                        "type": "string",
-                        "description": "The file name (e.g. 'report.md'). Will be saved in the output/ directory.",
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "The full Markdown content of the report.",
-                    },
-                },
-                "required": ["filename", "content"],
-            },
-        },
-    },
-]
+@tool
+def web_search(query: str) -> list[dict]:
+    """Search the internet for information using DuckDuckGo.
 
-# Dispatch map: name -> callable
-TOOL_FUNCTIONS = {
-    "web_search": web_search,
-    "read_url": read_url,
-    "write_report": write_report,
-    "knowledge_search": knowledge_search,
-}
+    Returns a list of results, each with 'title', 'url', and 'snippet' fields.
+    Snippets are short — use web_fetch(url) on a promising result to read the
+    full page content.
+    """
+    return _web_search(query)
+
+
+@tool
+def web_fetch(url: str) -> str:
+    """Fetch the full text content of a web page by URL.
+
+    Use this to read the complete content of a page found via web_search.
+    web_search returns only short snippets — use web_fetch when you need the
+    full article, documentation, or page body.
+    Returns the extracted text, truncated to avoid filling the context window.
+    """
+    return _read_url(url)
+
+
+@tool
+def knowledge_search(query: str) -> str:
+    """Search the local knowledge base of ingested PDF/TXT documents.
+
+    Use this for questions that may be answered by locally stored research
+    papers or documents. Returns the most relevant excerpts with source
+    and page references. Always try this before going to the web.
+    """
+    return _knowledge_search(query)
+
+
+@tool
+def save_report(filename: str, content: str) -> str:
+    """Save a Markdown research report to a file in the output directory.
+
+    Call this as the final step when the research has been approved by the Critic.
+    The file will be saved in the output/ directory.
+    """
+    return _save_report(filename, content)
+
