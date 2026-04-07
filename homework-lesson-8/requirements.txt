@@ -1,0 +1,9 @@
+openai>=1.0.0
+faiss-cpu
+rank_bm25
+sentence-transformers
+ddgs>=7.0
+trafilatura>=2.0.0
+pypdf
+pydantic>=2.12.0
+pydantic-settings>=2.12.0
