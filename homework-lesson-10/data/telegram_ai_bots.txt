@@ -1,0 +1,384 @@
+Building AI-Powered Telegram Bots
+==================================
+
+Source: Developer documentation and community best practices
+Last updated: 2025
+
+## Overview
+
+AI-powered Telegram bots combine the Telegram Bot API with large language models (LLMs) and retrieval-augmented generation (RAG) to create intelligent conversational agents. This document covers patterns, architectures, and implementation details for building production-ready AI bots on Telegram.
+
+## Architecture Patterns
+
+### Pattern 1: Simple LLM Chatbot
+The simplest pattern: user message → LLM → reply.
+
+```
+User Message → Bot Handler → OpenAI/Anthropic API → Reply
+```
+
+Suitable for: FAQ bots, general-purpose assistants, creative writing.
+Limitation: No memory between sessions, no access to external data.
+
+### Pattern 2: Stateful Conversation Bot
+Maintains conversation history per user.
+
+```
+User Message → Load History (Redis/DB) → LLM with Context → Reply → Save History
+```
+
+Implementation:
+```python
+import redis
+import json
+from openai import OpenAI
+
+r = redis.Redis()
+client = OpenAI()
+
+async def chat_handler(update, context):
+    user_id = update.effective_user.id
+    user_msg = update.message.text
+
+    # Load conversation history
+    history = json.loads(r.get(f"history:{user_id}") or "[]")
+    history.append({"role": "user", "content": user_msg})
+
+    # Keep last 20 messages to avoid token overflow
+    if len(history) > 20:
+        history = history[-20:]
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history
+    )
+
+    assistant_msg = response.choices[0].message.content
+    history.append({"role": "assistant", "content": assistant_msg})
+
+    # Save updated history (expire after 24h)
+    r.setex(f"history:{user_id}", 86400, json.dumps(history))
+
+    await update.message.reply_text(assistant_msg)
+```
+
+### Pattern 3: RAG Bot (Retrieval-Augmented Generation)
+Combines LLM with a knowledge base for grounded answers.
+
+```
+User Question
+    ↓
+Embedding Model → Vector Search → Relevant Chunks
+    ↓
+LLM (question + chunks as context) → Answer with citations
+```
+
+Use cases:
+- Customer support bot with product documentation
+- Internal company knowledge bot
+- Research assistant bot
+
+Implementation with FAISS:
+```python
+from sentence_transformers import SentenceTransformer
+import faiss, numpy as np
+
+embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+# ... load faiss index and chunks ...
+
+async def rag_handler(update, context):
+    query = update.message.text
+    query_emb = embed_model.encode([query]).astype(np.float32)
+    faiss.normalize_L2(query_emb)
+    _, indices = index.search(query_emb, 5)
+    chunks = [knowledge_base[i] for i in indices[0]]
+    context_text = "\n".join(chunks)
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": f"Answer based on this context:\n{context_text}"},
+            {"role": "user", "content": query}
+        ]
+    )
+    await update.message.reply_text(response.choices[0].message.content)
+```
+
+### Pattern 4: Agentic Bot with Tools
+Bot has access to tools (web search, code execution, APIs) and decides when to use them.
+
+```
+User Message → Agent Loop:
+    → LLM decides: answer directly OR call tool
+    → If tool: execute, add result to context, loop
+    → When ready: return final answer
+```
+
+Example tools for a Telegram agent:
+- web_search: DuckDuckGo or Tavily search
+- calculator: Evaluate math expressions
+- weather: Get current weather
+- calendar: Create/read Google Calendar events
+- image_gen: Generate images with DALL-E
+
+## Multi-User Handling
+
+Critical consideration: Telegram bots serve many users simultaneously.
+
+1. Thread safety: Use async handlers (python-telegram-bot v20+ is async by default)
+2. Per-user state: Use user_id as key in Redis/database, never store state in bot globals
+3. Rate limiting per user: Prevent abuse with per-user request quotas
+4. Conversation isolation: Each user has independent conversation history
+
+```python
+from collections import defaultdict
+from asyncio import Lock
+
+user_locks = defaultdict(Lock)  # prevent race conditions per user
+
+async def safe_handler(update, context):
+    user_id = update.effective_user.id
+    async with user_locks[user_id]:
+        # Process one message at a time per user
+        await process_message(update, context)
+```
+
+## File and Media Handling
+
+AI bots often need to process images, PDFs, or audio:
+
+### Image Analysis (GPT-4 Vision):
+```python
+async def photo_handler(update, context):
+    photo = update.message.photo[-1]  # highest resolution
+    file = await context.bot.get_file(photo.file_id)
+    file_url = file.file_path  # https://api.telegram.org/file/bot<token>/...
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": file_url}},
+                {"type": "text", "text": "Describe this image."}
+            ]
+        }]
+    )
+    await update.message.reply_text(response.choices[0].message.content)
+```
+
+### PDF Processing:
+```python
+import pypdf, io
+
+async def document_handler(update, context):
+    doc = update.message.document
+    file = await context.bot.get_file(doc.file_id)
+    file_bytes = await file.download_as_bytearray()
+
+    reader = pypdf.PdfReader(io.BytesIO(bytes(file_bytes)))
+    text = "\n".join(page.extract_text() for page in reader.pages)
+    text = text[:4000]  # truncate
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "user", "content": f"Summarize this PDF:\n\n{text}"}
+        ]
+    )
+    await update.message.reply_text(response.choices[0].message.content)
+```
+
+### Voice Messages (Whisper):
+```python
+async def voice_handler(update, context):
+    voice = update.message.voice
+    file = await context.bot.get_file(voice.file_id)
+    file_bytes = await file.download_as_bytearray()
+
+    # Transcribe with Whisper
+    transcript = client.audio.transcriptions.create(
+        model="whisper-1",
+        file=("voice.ogg", bytes(file_bytes), "audio/ogg")
+    )
+    user_text = transcript.text
+
+    # Then process as normal text message
+    await process_text_query(update, user_text)
+```
+
+## Streaming Responses
+
+For long AI responses, use streaming to show progress:
+
+```python
+async def streaming_handler(update, context):
+    msg = await update.message.reply_text("Thinking...")
+    full_response = ""
+
+    stream = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": update.message.text}],
+        stream=True
+    )
+
+    for chunk in stream:
+        if chunk.choices[0].delta.content:
+            full_response += chunk.choices[0].delta.content
+            # Update message every 50 characters to avoid rate limits
+            if len(full_response) % 50 == 0:
+                try:
+                    await msg.edit_text(full_response)
+                except Exception:
+                    pass  # ignore edit conflicts
+
+    await msg.edit_text(full_response)  # final update
+```
+
+## Human-in-the-Loop Patterns
+
+For bots that take actions (send emails, create calendar events), add approval steps:
+
+```python
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+pending_actions = {}  # action_id → action_data
+
+async def agent_handler(update, context):
+    user_id = update.effective_user.id
+    # Agent decides to take an action...
+    action = {"type": "send_email", "to": "boss@company.com", "body": "..."}
+
+    # Store pending action
+    action_id = str(uuid.uuid4())
+    pending_actions[action_id] = action
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Approve", callback_data=f"approve:{action_id}"),
+        InlineKeyboardButton("❌ Reject", callback_data=f"reject:{action_id}"),
+    ]])
+
+    await update.message.reply_text(
+        f"I want to send an email to {action['to']}. Approve?",
+        reply_markup=keyboard
+    )
+
+async def callback_handler(update, context):
+    query = update.callback_query
+    decision, action_id = query.data.split(":")
+    action = pending_actions.pop(action_id, None)
+
+    if decision == "approve" and action:
+        execute_action(action)
+        await query.edit_message_text("✅ Done! Email sent.")
+    else:
+        await query.edit_message_text("❌ Action cancelled.")
+```
+
+## Cost Optimization
+
+1. Model selection:
+   - gpt-4o-mini for simple Q&A (10x cheaper than gpt-4o)
+   - gpt-4o for complex reasoning, vision
+   - Use local models (Ollama) for very high volume
+
+2. Caching: Cache LLM responses for identical queries (Redis with TTL)
+   ```python
+   cache_key = hashlib.md5(query.encode()).hexdigest()
+   cached = r.get(f"llm_cache:{cache_key}")
+   if cached:
+       return cached.decode()
+   ```
+
+3. Context management: Summarize old messages instead of keeping full history
+
+4. Prompt optimization: Shorter system prompts save tokens on every request
+
+## Monitoring and Analytics
+
+Track these metrics for production AI bots:
+- Messages per hour / per user
+- LLM API costs (tokens in/out per model)
+- Response latency (p50, p95, p99)
+- Error rate (API failures, Telegram rate limits)
+- User retention (DAU/MAU)
+
+Tools: Grafana + Prometheus, Sentry for error tracking, custom DB tables for conversation analytics.
+
+## Testing Telegram Bots
+
+Unit tests for handlers:
+```python
+from unittest.mock import AsyncMock, MagicMock
+import pytest
+
+@pytest.mark.asyncio
+async def test_start_command():
+    update = MagicMock()
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+
+    await start_handler(update, context)
+
+    update.message.reply_text.assert_called_once_with("Hello! I'm a bot.")
+```
+
+Integration testing:
+- Use the Telegram Test Environment (test.telegram.org)
+- Bot tokens for test environment are separate from production
+- Create test conversations automatically with the MTProto API (Telethon)
+
+## Production Checklist
+
+- [ ] Token stored in environment variable, not code
+- [ ] Webhook with secret_token validation
+- [ ] SSL certificate valid
+- [ ] Error handling for all API calls
+- [ ] Rate limit handling (429 retry with backoff)
+- [ ] Per-user conversation state with TTL (prevent memory leaks)
+- [ ] Logging to centralized service (not just stdout)
+- [ ] Health check endpoint
+- [ ] Graceful shutdown handling (SIGTERM → flush queues → exit)
+- [ ] LLM costs monitored with alerts
+- [ ] Backup plan if LLM API is unavailable (fallback message)
+
+## Popular AI Bot Examples on Telegram
+
+1. @ChatGPT_telegrambot — wraps OpenAI GPT with conversation memory
+2. @GrammarlyBot — grammar and writing assistance
+3. @MidJourneyBot — image generation
+4. @WriteSonicBot — content generation
+5. Custom RAG bots — company internal knowledge bases accessible via Telegram
+
+## LangChain Integration
+
+LangChain works well for complex AI bots:
+
+```python
+from langchain_openai import ChatOpenAI
+from langchain.agents import create_react_agent
+from langchain.tools import DuckDuckGoSearchTool
+
+model = ChatOpenAI(model="gpt-4o")
+tools = [DuckDuckGoSearchTool()]
+agent = create_react_agent(model, tools)
+
+async def agent_handler(update, context):
+    result = agent.invoke({"messages": [{"role": "user", "content": update.message.text}]})
+    await update.message.reply_text(result["messages"][-1].content)
+```
+
+## Conclusion
+
+Building AI-powered Telegram bots requires combining:
+1. Telegram Bot API knowledge (handlers, keyboards, file handling)
+2. LLM integration (OpenAI, Anthropic, local models)
+3. State management (Redis, databases)
+4. Production concerns (rate limits, costs, monitoring)
+
+The recommended stack for 2025:
+- python-telegram-bot >= 21 (async, robust)
+- OpenAI SDK >= 1.0 or LangChain for LLM
+- Redis for conversation state
+- PostgreSQL for persistent user data
+- Docker + Railway/VPS for deployment
