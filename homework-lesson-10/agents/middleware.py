@@ -61,11 +61,11 @@ class BudgetMiddleware(AgentMiddleware):
         budget["remaining"] -= 1
         remaining = budget["remaining"]
 
-        if remaining <= 0:
+        if remaining <= 1:
             limit_msg = "You spend all tool call budget. You must provide the final answer."
         else:
             limit_msg = (
-                f"You can call tools another {remaining} times before producing the final answer."
+                f"You can call tools another {remaining-1} times before producing the final answer."
             )
 
         wrapped_content = (
