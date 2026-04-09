@@ -5,6 +5,9 @@ import re
 
 from langchain.agents import create_agent
 from langchain.tools import tool
+from langgraph.errors import GraphRecursionError
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.memory import InMemorySaver
 
 from config import Settings, get_model, get_planner_prompt
 from schemas import ResearchPlan
@@ -16,6 +19,7 @@ _planner_agent = create_agent(
     get_model(),
     tools=[web_search, web_fetch, knowledge_search],
     system_prompt=get_planner_prompt(),
+    checkpointer=InMemorySaver(),
     response_format=None if _settings.structured_output_workaround else ResearchPlan,
 )
 
@@ -42,7 +46,7 @@ def _extract_plan(text: str) -> ResearchPlan | None:
 
 
 @tool
-def plan(request: str) -> str:
+def plan(request: str, config: RunnableConfig = None) -> str:
     """Decompose a research request into a structured ResearchPlan.
 
     The planner does preliminary domain reconnaissance (knowledge base +
@@ -52,17 +56,36 @@ def plan(request: str) -> str:
     Input: The user's original research request (natural language).
     Output: JSON-serialized ResearchPlan.
     """
+    supervisor_thread = (config or {}).get("configurable", {}).get("thread_id", "default")
+    sub_config: RunnableConfig = {
+        "recursion_limit": _settings.max_iterations,
+        "configurable": {"thread_id": f"{supervisor_thread}:planner"},
+    }
+
     try:
         result = _planner_agent.invoke(
-            {"messages": [{"role": "user", "content": request}]}
+            {"messages": [{"role": "user", "content": request}]},
+            config=sub_config,
         )
+    except GraphRecursionError:
+        return json.dumps({
+            "goal": request,
+            "search_queries": [request],
+            "sources_to_check": ["knowledge_base", "web"],
+            "output_format": "comprehensive Markdown report with sections and citations",
+            "_error": (
+                f"[PLAN LIMIT REACHED] Planner exhausted its tool-call budget "
+                f"(max_iterations={_settings.max_iterations}). "
+                "A minimal fallback plan has been generated. Proceed with research()."
+            ),
+        }, indent=2)
     except Exception as e:
         return json.dumps({
             "goal": request,
             "search_queries": [request],
             "sources_to_check": ["knowledge_base", "web"],
             "output_format": "comprehensive Markdown report with sections and citations",
-            "_error": f"Planner failed: {e}",
+            "_error": f"Planner unexpected error: {type(e).__name__}: {e}",
         }, indent=2)
 
     # With response_format= the structured result is in "structured_response"

@@ -94,6 +94,11 @@ Rules:
 - Cite every source (filename + page, or URL)
 - Return detailed, structured findings as Markdown text
 - Cover ALL search_queries from the plan
+
+Revision rounds:
+- If you can see a previous research attempt in your conversation history, this is a REVISION request.
+- Do NOT repeat tool calls you already made. Focus exclusively on the gaps listed by the critic.
+- Reference and reuse findings from your earlier attempt where they are still valid — do not discard good work.
 """
 
 _CRITIC_BASE = f"""You are a Research Critic. Independently verify and evaluate research findings.

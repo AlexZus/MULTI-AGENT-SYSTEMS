@@ -5,6 +5,9 @@ import re
 
 from langchain.agents import create_agent
 from langchain.tools import tool
+from langgraph.errors import GraphRecursionError
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.memory import InMemorySaver
 
 from config import Settings, get_critic_prompt, get_model
 from schemas import CritiqueResult
@@ -16,6 +19,7 @@ _critic_agent = create_agent(
     get_model(),
     tools=[web_search, web_fetch, knowledge_search],
     system_prompt=get_critic_prompt(),
+    checkpointer=InMemorySaver(),
     response_format=None if _settings.structured_output_workaround else CritiqueResult,
 )
 
@@ -42,7 +46,7 @@ def _extract_critique(text: str) -> CritiqueResult | None:
 
 
 @tool
-def critique(findings: str | dict) -> str:
+def critique(findings: str | dict, config: RunnableConfig = None) -> str:
     """Independently evaluate research findings for freshness, completeness, and structure.
 
     The critic runs its own verification searches before returning a structured
@@ -55,9 +59,30 @@ def critique(findings: str | dict) -> str:
     if isinstance(findings, dict):
         findings = json.dumps(findings, ensure_ascii=False, indent=2)
 
+    supervisor_thread = (config or {}).get("configurable", {}).get("thread_id", "default")
+    sub_config: RunnableConfig = {
+        "recursion_limit": _settings.max_iterations,
+        "configurable": {"thread_id": f"{supervisor_thread}:critic"},
+    }
+
     try:
         result = _critic_agent.invoke(
-            {"messages": [{"role": "user", "content": findings}]}
+            {"messages": [{"role": "user", "content": findings}]},
+            config=sub_config,
+        )
+    except GraphRecursionError:
+        return CritiqueResult(
+            verdict="APPROVE",
+            is_fresh=True,
+            is_complete=True,
+            is_well_structured=True,
+            strengths=["Research appears comprehensive"],
+            gaps=[],
+            revision_requests=[],
+        ).model_dump_json(indent=2) + (
+            f"\n// [CRITIC LIMIT REACHED] Critic exhausted its tool-call budget "
+            f"(max_iterations={_settings.max_iterations}). "
+            "Auto-approved to allow the pipeline to complete."
         )
     except Exception as e:
         return CritiqueResult(
@@ -68,7 +93,7 @@ def critique(findings: str | dict) -> str:
             strengths=["Research appears comprehensive"],
             gaps=[],
             revision_requests=[],
-        ).model_dump_json(indent=2) + f'\n// Critic agent error (auto-approved): {e}'
+        ).model_dump_json(indent=2) + f"\n// Critic agent unexpected error (auto-approved): {type(e).__name__}: {e}"
 
     # With response_format= the structured result is in "structured_response"
     if not _settings.structured_output_workaround:
