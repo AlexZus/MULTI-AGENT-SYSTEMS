@@ -6,7 +6,11 @@ import uuid
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command, Interrupt
 
+from agents.middleware import _tool_budget
+from config import Settings
 from supervisor import create_supervisor
+
+_settings = Settings()
 
 # ── Pretty-printing helpers ────────────────────────────────────────────────────
 
@@ -160,9 +164,13 @@ def main() -> None:
 
         print(f"\n[Supervisor starting — thread {thread_id[:8]}]")
 
-        interrupted, interrupts = _stream_until_interrupt(supervisor, input_data, config)
-        if interrupted:
-            _handle_hitl(supervisor, interrupts, config)
+        token = _tool_budget.set({"remaining": _settings.max_iterations})
+        try:
+            interrupted, interrupts = _stream_until_interrupt(supervisor, input_data, config)
+            if interrupted:
+                _handle_hitl(supervisor, interrupts, config)
+        finally:
+            _tool_budget.reset(token)
 
         # Print final supervisor message if present
         try:

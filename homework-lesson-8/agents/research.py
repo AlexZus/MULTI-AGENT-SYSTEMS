@@ -4,10 +4,11 @@ import json
 
 from langchain.agents import create_agent
 from langchain.tools import tool
-from langgraph.errors import GraphRecursionError
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.errors import GraphRecursionError
 
+from agents.middleware import BudgetMiddleware, InvalidToolCallRetryMiddleware, _tool_budget
 from config import Settings, get_model, RESEARCHER_SYSTEM_PROMPT
 from tools import knowledge_search, web_fetch, web_search
 
@@ -18,6 +19,12 @@ _research_agent = create_agent(
     tools=[web_search, web_fetch, knowledge_search],
     system_prompt=RESEARCHER_SYSTEM_PROMPT,
     checkpointer=InMemorySaver(),
+    middleware=[
+        BudgetMiddleware(),
+        InvalidToolCallRetryMiddleware(
+            max_retries=_settings.subagent_output_retry_number_on_validation_fail
+        ),
+    ],
 )
 
 
@@ -41,6 +48,7 @@ def research(request: str | dict, config: RunnableConfig = None) -> str:
         "configurable": {"thread_id": f"{supervisor_thread}:researcher"},
     }
 
+    token = _tool_budget.set({"remaining": _settings.max_iterations})
     try:
         result = _research_agent.invoke(
             {"messages": [{"role": "user", "content": request}]},
@@ -57,6 +65,8 @@ def research(request: str | dict, config: RunnableConfig = None) -> str:
         )
     except Exception as e:
         return f"Research agent unexpected error: {type(e).__name__}: {e}"
+    finally:
+        _tool_budget.reset(token)
 
     messages = result.get("messages", [])
     if not messages:

@@ -5,10 +5,11 @@ import re
 
 from langchain.agents import create_agent
 from langchain.tools import tool
-from langgraph.errors import GraphRecursionError
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.errors import GraphRecursionError
 
+from agents.middleware import BudgetMiddleware, InvalidToolCallRetryMiddleware, _tool_budget
 from config import Settings, get_critic_prompt, get_model
 from schemas import CritiqueResult
 from tools import knowledge_search, web_fetch, web_search
@@ -20,10 +21,36 @@ _critic_agent = create_agent(
     tools=[web_search, web_fetch, knowledge_search],
     system_prompt=get_critic_prompt(),
     checkpointer=InMemorySaver(),
+    middleware=[
+        BudgetMiddleware(),
+        InvalidToolCallRetryMiddleware(
+            max_retries=_settings.subagent_output_retry_number_on_validation_fail
+        ),
+    ],
     response_format=None if _settings.structured_output_workaround else CritiqueResult,
 )
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+_CRITIQUE_CORRECTION_MSG = (
+    "Your previous response did not contain a valid JSON block matching the CritiqueResult schema. "
+    "You MUST end your response with a fenced JSON block in exactly this format:\n"
+    "```json\n"
+    '{{"verdict": "APPROVE", "is_fresh": true, "is_complete": true, '
+    '"is_well_structured": true, "strengths": ["..."], "gaps": [], "revision_requests": []}}\n'
+    "```\n"
+    'The verdict must be exactly "APPROVE" or "REVISE". Output the JSON block now.'
+)
+
+_AUTO_APPROVE = CritiqueResult(
+    verdict="APPROVE",
+    is_fresh=True,
+    is_complete=True,
+    is_well_structured=True,
+    strengths=["Research appears comprehensive"],
+    gaps=[],
+    revision_requests=[],
+)
 
 
 def _extract_critique(text: str) -> CritiqueResult | None:
@@ -43,6 +70,39 @@ def _extract_critique(text: str) -> CritiqueResult | None:
         except Exception:
             pass
     return None
+
+
+def _invoke_critic(msg_content: str, sub_config: RunnableConfig) -> tuple[str, dict | None]:
+    """Invoke the critic agent once; return (text_output, raw_result)."""
+    token = _tool_budget.set({"remaining": _settings.max_iterations})
+    try:
+        result = _critic_agent.invoke(
+            {"messages": [{"role": "user", "content": msg_content}]},
+            config=sub_config,
+        )
+    except GraphRecursionError:
+        fallback = _AUTO_APPROVE.model_dump_json(indent=2)
+        fallback += (
+            f"\n// [CRITIC LIMIT REACHED] Critic exhausted its tool-call budget "
+            f"(max_iterations={_settings.max_iterations}). "
+            "Auto-approved to allow the pipeline to complete."
+        )
+        return fallback, None
+    except Exception as e:
+        fallback = _AUTO_APPROVE.model_dump_json(indent=2)
+        fallback += f"\n// Critic agent unexpected error (auto-approved): {type(e).__name__}: {e}"
+        return fallback, None
+    finally:
+        _tool_budget.reset(token)
+
+    messages = result.get("messages", [])
+    last = messages[-1] if messages else None
+    text = ""
+    if last:
+        text = last.text if isinstance(getattr(last, "text", None), str) else (
+            last.text() if callable(getattr(last, "text", None)) else str(last.content)
+        )
+    return text, result
 
 
 @tool
@@ -65,65 +125,34 @@ def critique(findings: str | dict, config: RunnableConfig = None) -> str:
         "configurable": {"thread_id": f"{supervisor_thread}:critic"},
     }
 
-    try:
-        result = _critic_agent.invoke(
-            {"messages": [{"role": "user", "content": findings}]},
-            config=sub_config,
-        )
-    except GraphRecursionError:
-        return CritiqueResult(
-            verdict="APPROVE",
-            is_fresh=True,
-            is_complete=True,
-            is_well_structured=True,
-            strengths=["Research appears comprehensive"],
-            gaps=[],
-            revision_requests=[],
-        ).model_dump_json(indent=2) + (
-            f"\n// [CRITIC LIMIT REACHED] Critic exhausted its tool-call budget "
-            f"(max_iterations={_settings.max_iterations}). "
-            "Auto-approved to allow the pipeline to complete."
-        )
-    except Exception as e:
-        return CritiqueResult(
-            verdict="APPROVE",
-            is_fresh=True,
-            is_complete=True,
-            is_well_structured=True,
-            strengths=["Research appears comprehensive"],
-            gaps=[],
-            revision_requests=[],
-        ).model_dump_json(indent=2) + f"\n// Critic agent unexpected error (auto-approved): {type(e).__name__}: {e}"
+    retry_limit = _settings.subagent_output_retry_number_on_validation_fail
 
-    # With response_format= the structured result is in "structured_response"
-    if not _settings.structured_output_workaround:
-        critique_obj = result.get("structured_response")
-        if isinstance(critique_obj, CritiqueResult):
+    for attempt in range(retry_limit + 1):
+        msg = findings if attempt == 0 else _CRITIQUE_CORRECTION_MSG
+        text, result = _invoke_critic(msg, sub_config)
+
+        # Hard error — return the annotated auto-approve JSON directly
+        if result is None:
+            return text
+
+        # Structured-output path
+        if not _settings.structured_output_workaround and result:
+            critique_obj = result.get("structured_response")
+            if isinstance(critique_obj, CritiqueResult):
+                return critique_obj.model_dump_json(indent=2)
+
+        # Text-extraction path
+        critique_obj = _extract_critique(text)
+        if critique_obj:
             return critique_obj.model_dump_json(indent=2)
 
-    # Workaround path: extract JSON from the model's text response
-    messages = result.get("messages", [])
-    last = messages[-1] if messages else None
-    text = ""
-    if last:
-        text = last.text if isinstance(getattr(last, "text", None), str) else (
-            last.text() if callable(getattr(last, "text", None)) else str(last.content)
-        )
+        # Extraction failed — retry if budget allows
 
-    critique_obj = _extract_critique(text)
-    if critique_obj:
-        return critique_obj.model_dump_json(indent=2)
-
+    # All retries exhausted without valid JSON
     if text:
         return text
 
-    # Final fallback: auto-approve so the pipeline can always complete
-    return CritiqueResult(
-        verdict="APPROVE",
-        is_fresh=True,
-        is_complete=True,
-        is_well_structured=True,
-        strengths=["Research appears comprehensive (auto-approved: critic produced no parseable output)"],
-        gaps=[],
-        revision_requests=[],
-    ).model_dump_json(indent=2)
+    return (
+        _AUTO_APPROVE.model_dump_json(indent=2)
+        + "\n// Auto-approved: critic produced no parseable output after all retries."
+    )

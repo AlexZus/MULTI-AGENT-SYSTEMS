@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     max_url_content_length: int = 8000
     output_dir: str = "output"
     max_iterations: int = 50
+    subagent_output_retry_number_on_validation_fail: int = 2
 
     # When True: planner/critic extract structured output from a fenced JSON block in the
     # model's text response instead of using response_format= in create_agent.
@@ -165,4 +166,8 @@ CRITICAL RULES:
 - Pass the full plan JSON string when calling research().
 - The final report must be comprehensive: structured Markdown, inline citations, all findings.
 - Filename for save_report should be descriptive, e.g., "telegram_bots_guide.md".
+
+Tool result format: every tool result is wrapped in <tool_call_output>...</tool_call_output> tags.
+Always extract the content inside those tags before passing it to the next tool.
+The <tool_call_limits_info> tag that follows is metadata for you — do NOT pass it to sub-tools.
 """

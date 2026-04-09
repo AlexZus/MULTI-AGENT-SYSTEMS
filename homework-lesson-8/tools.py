@@ -66,14 +66,15 @@ def _save_report(filename: str, content: str) -> str:
 # ── LangChain @tool versions ──────────────────────────────────────────────────
 
 @tool
-def web_search(query: str) -> list[dict]:
+def web_search(query: str) -> str:
     """Search the internet for information using DuckDuckGo.
 
-    Returns a list of results, each with 'title', 'url', and 'snippet' fields.
+    Returns a JSON array of results, each with 'title', 'url', and 'snippet' fields.
     Snippets are short — use web_fetch(url) on a promising result to read the
     full page content.
     """
-    return _web_search(query)
+    import json
+    return json.dumps(_web_search(query), ensure_ascii=False, indent=2)
 
 
 @tool
