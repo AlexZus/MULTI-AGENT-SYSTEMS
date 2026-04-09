@@ -9,6 +9,7 @@ InvalidToolCallRetryMiddleware — retries model calls where the LLM produced to
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from contextvars import ContextVar
 from typing import Any, Callable
 
@@ -53,7 +54,17 @@ class BudgetMiddleware(AgentMiddleware):
         handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
     ) -> ToolMessage | Command[Any]:
         result = handler(request)
+        return self._apply_budget(result)
 
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
+        result = await handler(request)
+        return self._apply_budget(result)
+
+    def _apply_budget(self, result: ToolMessage | Command[Any]) -> ToolMessage | Command[Any]:
         budget = _tool_budget.get()
         if budget is None or not isinstance(result, ToolMessage):
             return result
@@ -61,11 +72,11 @@ class BudgetMiddleware(AgentMiddleware):
         budget["remaining"] -= 1
         remaining = budget["remaining"]
 
-        if remaining <= 0:
+        if remaining <= 1:
             limit_msg = "You spend all tool call budget. You must provide the final answer."
         else:
             limit_msg = (
-                f"You can call tools another {remaining} times before producing the final answer."
+                f"You can call tools another {remaining - 1} times before producing the final answer."
             )
 
         wrapped_content = (
@@ -100,34 +111,52 @@ class InvalidToolCallRetryMiddleware(AgentMiddleware):
     ) -> ModelResponse:
         for attempt in range(self.max_retries + 1):
             response = handler(request)
-
-            if not response.result:
+            request, done = self._check_invalid(request, response, attempt)
+            if done:
                 return response
-
-            ai_msg = response.result[0]
-            if not isinstance(ai_msg, AIMessage):
-                return response
-
-            invalid = ai_msg.invalid_tool_calls or []
-            if not invalid or attempt >= self.max_retries:
-                return response
-
-            # Build human-readable error description
-            error_lines = []
-            for tc in invalid:
-                name = tc.get("name") or "unknown"
-                args = tc.get("args") or ""
-                err = tc.get("error") or "invalid JSON"
-                error_lines.append(f"  - tool '{name}': {err}\n    raw args: {args!r}")
-
-            correction = HumanMessage(
-                content=(
-                    "Your previous tool call could not be executed because the arguments "
-                    "contained invalid JSON syntax. Please fix the JSON and retry.\n\n"
-                    "Error details:\n" + "\n".join(error_lines)
-                )
-            )
-            # Extend the in-flight message list: bad AI message + corrective user message
-            request = request.override(messages=request.messages + [ai_msg, correction])
 
         return response  # return last response even if still invalid
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        for attempt in range(self.max_retries + 1):
+            response = await handler(request)
+            request, done = self._check_invalid(request, response, attempt)
+            if done:
+                return response
+
+        return response
+
+    def _check_invalid(
+        self, request: ModelRequest, response: ModelResponse, attempt: int
+    ) -> tuple[ModelRequest, bool]:
+        """Return (updated_request, should_return). If should_return is True, stop retrying."""
+        if not response.result:
+            return request, True
+
+        ai_msg = response.result[0]
+        if not isinstance(ai_msg, AIMessage):
+            return request, True
+
+        invalid = ai_msg.invalid_tool_calls or []
+        if not invalid or attempt >= self.max_retries:
+            return request, True
+
+        error_lines = []
+        for tc in invalid:
+            name = tc.get("name") or "unknown"
+            args = tc.get("args") or ""
+            err = tc.get("error") or "invalid JSON"
+            error_lines.append(f"  - tool '{name}': {err}\n    raw args: {args!r}")
+
+        correction = HumanMessage(
+            content=(
+                "Your previous tool call could not be executed because the arguments "
+                "contained invalid JSON syntax. Please fix the JSON and retry.\n\n"
+                "Error details:\n" + "\n".join(error_lines)
+            )
+        )
+        return request.override(messages=request.messages + [ai_msg, correction]), False

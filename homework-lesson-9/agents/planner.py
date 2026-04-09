@@ -122,7 +122,7 @@ def plan(request: str, config: RunnableConfig = None) -> str:
     """
     supervisor_thread = (config or {}).get("configurable", {}).get("thread_id", "default")
     sub_config: RunnableConfig = {
-        "recursion_limit": _settings.max_iterations,
+        "recursion_limit": _settings.max_iterations * 2 + 2,
         "configurable": {"thread_id": f"{supervisor_thread}:planner"},
     }
 

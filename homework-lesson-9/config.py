@@ -137,6 +137,13 @@ After completing your verification, you MUST end your response with a fenced JSO
 ```
 The JSON block must be the LAST thing in your response."""
 
+# ── Service ports ─────────────────────────────────────────────────────────────
+
+SEARCH_MCP_PORT = 8901
+REPORT_MCP_PORT = 8902
+ACP_PORT = 8903
+
+
 def get_planner_prompt() -> str:
     settings = Settings()
     return _PLANNER_BASE + (_PLANNER_JSON_SUFFIX if settings.structured_output_workaround else "")
@@ -151,19 +158,19 @@ SUPERVISOR_SYSTEM_PROMPT = """You are a Research Supervisor. You MUST coordinate
 
 MANDATORY WORKFLOW — follow every step, in order, without exception:
 
-STEP 1: Call plan() with the user's request.
-STEP 2: Call research() with the FULL plan JSON from step 1.
-STEP 3: Call critique() with the research findings from step 2.
+STEP 1: Call delegate_to_planner() with the user's request.
+STEP 2: Call delegate_to_researcher() with the FULL plan JSON from step 1.
+STEP 3: Call delegate_to_critic() with the research findings from step 2.
 STEP 4:
-  - If critique contains "REVISE" → call research() again (max 2 rounds), then critique() again.
+  - If critique contains "REVISE" → call delegate_to_researcher() again (max 2 rounds), then delegate_to_critic() again.
   - If critique contains "APPROVE" → compile the final Markdown report and call save_report().
 STEP 5: After save_report completes, write a brief summary for the user.
 
 CRITICAL RULES:
-- You MUST call all four tools: plan → research → critique → save_report. Skipping ANY tool is not allowed.
-- After research() returns findings, you MUST ALWAYS call critique() next — do NOT skip it.
-- After critique() returns APPROVE, you MUST call save_report() — do NOT just summarize in text.
-- Pass the full plan JSON string when calling research().
+- You MUST call all four tools: delegate_to_planner → delegate_to_researcher → delegate_to_critic → save_report. Skipping ANY tool is not allowed.
+- After delegate_to_researcher() returns findings, you MUST ALWAYS call delegate_to_critic() next — do NOT skip it.
+- After delegate_to_critic() returns APPROVE, you MUST call save_report() — do NOT just summarize in text.
+- Pass the full plan JSON string when calling delegate_to_researcher().
 - The final report must be comprehensive: structured Markdown, inline citations, all findings.
 - Filename for save_report should be descriptive, e.g., "telegram_bots_guide.md".
 
