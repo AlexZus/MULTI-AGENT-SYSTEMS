@@ -1,0 +1,237 @@
+Telegram Bots: Complete Developer Guide
+=======================================
+
+Source: Telegram Bot API Documentation (https://core.telegram.org/bots)
+Last updated: 2025
+
+## What is a Telegram Bot?
+
+Telegram bots are special accounts that do not require a phone number to set up. Bots are created and controlled by developers using the Telegram Bot API — a HTTP-based interface for developers who want to build bots. Users interact with bots by sending messages, commands, and inline queries.
+
+Bots can:
+- Send and receive messages, photos, stickers, videos, files
+- Respond to commands (e.g., /start, /help, /settings)
+- Inline queries: users can summon bots directly in any chat
+- Process payments through the Payments API
+- Create interactive web apps (Telegram Web Apps)
+- Join groups and channels as members or admins
+
+## Creating Your First Bot
+
+Step 1: Talk to @BotFather
+- Open Telegram and search for @BotFather (the official bot creation service)
+- Send /start then /newbot
+- Choose a name and username for your bot (must end in "bot", e.g., myresearch_bot)
+- BotFather returns an API token like: 7234567890:AAFXlzxx...
+- NEVER share this token publicly — it grants full control of your bot
+
+Step 2: Set up the Bot API
+- Base URL: https://api.telegram.org/bot<token>/METHOD_NAME
+- All methods support GET and POST
+- Methods return JSON objects
+- Each update can be retrieved via getUpdates (polling) or via Webhooks
+
+## Polling vs Webhooks
+
+Polling (getUpdates):
+- Bot periodically calls getUpdates to fetch new messages
+- Simpler to implement, good for development
+- Higher latency (depends on polling interval)
+- Example: GET https://api.telegram.org/bot<token>/getUpdates?offset=<update_id>
+
+Webhooks:
+- Telegram pushes updates to your HTTPS endpoint in real-time
+- Lower latency, more efficient for production
+- Requires a valid SSL certificate and public HTTPS URL
+- Set with: setWebhook?url=https://yourserver.com/webhook
+
+## Python Libraries for Telegram Bots
+
+### python-telegram-bot (most popular)
+- Installation: pip install python-telegram-bot
+- Version 20+ uses async/await (asyncio)
+- Example:
+  ```python
+  from telegram.ext import Application, CommandHandler
+
+  async def start(update, context):
+      await update.message.reply_text("Hello! I'm a bot.")
+
+  app = Application.builder().token("TOKEN").build()
+  app.add_handler(CommandHandler("start", start))
+  app.run_polling()
+  ```
+
+### aiogram (fast async framework)
+- Installation: pip install aiogram
+- Built on asyncio, great for high-load bots
+- Uses dispatcher + router pattern
+- Example:
+  ```python
+  from aiogram import Bot, Dispatcher, types
+  from aiogram.filters import Command
+
+  bot = Bot(token="TOKEN")
+  dp = Dispatcher()
+
+  @dp.message(Command("start"))
+  async def cmd_start(message: types.Message):
+      await message.answer("Hello from aiogram!")
+
+  if __name__ == "__main__":
+      dp.run_polling(bot)
+  ```
+
+### pyTelegramBotAPI (telebot)
+- Installation: pip install pyTelegramBotAPI
+- Synchronous and async versions available
+- Simpler API, good for beginners
+  ```python
+  import telebot
+
+  bot = telebot.TeleBot("TOKEN")
+
+  @bot.message_handler(commands=['start'])
+  def send_welcome(message):
+      bot.reply_to(message, "Hello!")
+
+  bot.infinity_polling()
+  ```
+
+## Bot Commands
+
+Commands start with /. Register them with BotFather using /setcommands:
+- /start — Bot introduction and onboarding
+- /help — Show available commands
+- /settings — User preferences
+
+Inline keyboards allow buttons in messages:
+```python
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+keyboard = InlineKeyboardMarkup([[
+    InlineKeyboardButton("Approve", callback_data="approve"),
+    InlineKeyboardButton("Reject", callback_data="reject"),
+]])
+await update.message.reply_text("Choose:", reply_markup=keyboard)
+```
+
+## Message Types and Handlers
+
+Text messages: message.text
+Photos: message.photo (list of PhotoSize, highest resolution is last)
+Documents: message.document (file_id, file_name, mime_type)
+Audio: message.audio, message.voice
+Location: message.location (latitude, longitude)
+Stickers: message.sticker
+
+## Groups and Channels
+
+Bots in groups:
+- Must be added by admin
+- Can read all messages if "Privacy Mode" is disabled (BotFather: /setprivacy)
+- Can be made admin to delete messages, pin messages, etc.
+
+Bots in channels:
+- Can post as the channel if made admin
+- Use send_message with chat_id = @channelname or numeric channel ID
+
+## Security Best Practices
+
+1. Never hardcode the token — use environment variables:
+   import os
+   TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+
+2. Validate webhook requests using the secret_token parameter
+
+3. Rate limiting: Telegram allows 30 messages/second to different chats, 1 message/second to the same chat
+
+4. Bot API limits: max message length 4096 chars, caption max 1024 chars, file upload max 50MB
+
+5. Always handle exceptions — network errors and Telegram API errors are common
+
+## Deployment
+
+Local development: run_polling() is easiest
+Production options:
+- Railway, Heroku, Render (PaaS) — simple, managed
+- VPS (DigitalOcean, Linode) with systemd service
+- Docker containers
+- AWS Lambda / Google Cloud Functions (webhook-based, serverless)
+
+For webhook deployment on VPS:
+```bash
+# Set webhook
+curl -X POST https://api.telegram.org/bot<TOKEN>/setWebhook \
+  -d url=https://yourdomain.com/webhook \
+  -d secret_token=YOUR_SECRET
+```
+
+## Inline Mode
+
+Inline bots respond to @botname queries in any chat.
+Enable with BotFather: /setinline
+```python
+from telegram.ext import InlineQueryHandler
+from telegram import InlineQueryResultArticle, InputTextMessageContent
+
+async def inline_query(update, context):
+    results = [
+        InlineQueryResultArticle(
+            id="1",
+            title="Search result",
+            input_message_content=InputTextMessageContent("Hello from inline!"),
+        )
+    ]
+    await update.inline_query.answer(results)
+
+app.add_handler(InlineQueryHandler(inline_query))
+```
+
+## Payments API
+
+Bots can accept payments through Telegram using the Payments API:
+- Supports Stripe, YooMoney, and other providers
+- Requires registering with a payment provider through BotFather
+- Flow: sendInvoice → pre_checkout_query → successful_payment
+- Currency codes: USD, EUR, UAH, RUB (100+ currencies supported)
+
+## Telegram Web Apps (Mini Apps)
+
+Launch full web applications inside Telegram:
+- Use any web technology (React, Vue, vanilla JS)
+- Access Telegram user data via window.Telegram.WebApp
+- Send data back to bot with WebApp.sendData()
+- Available since Bot API 6.0 (2022)
+
+```javascript
+const tg = window.Telegram.WebApp;
+tg.ready();
+const user = tg.initDataUnsafe?.user;
+// user.id, user.first_name, user.username
+tg.sendData(JSON.stringify({action: "purchase", item_id: 42}));
+```
+
+## Rate Limits and Best Practices
+
+- 30 msg/sec across all chats (global)
+- 1 msg/sec per chat
+- Flooding protection: Telegram returns 429 Too Many Requests with retry_after
+- Use message queues (Redis, RabbitMQ) for high-volume bots
+- Implement exponential backoff on 429 errors
+- Cache user data to reduce database queries
+
+## Debugging and Testing
+
+1. Use test bots: @BotFather → /newbot with name ending in _test
+   - Test environment: https://api.telegram.org/bot<token>/test/METHOD
+
+2. ngrok for local webhook testing:
+   ngrok http 8000
+   # Then set webhook to https://xxxxx.ngrok.io/webhook
+
+3. Logging: Enable python-telegram-bot logging:
+   import logging
+   logging.basicConfig(level=logging.DEBUG)
+
+4. Use getUpdates to inspect incoming update structure before coding handlers
