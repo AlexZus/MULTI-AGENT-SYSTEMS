@@ -124,6 +124,7 @@ def plan(request: str, config: RunnableConfig = None) -> str:
     sub_config: RunnableConfig = {
         "recursion_limit": _settings.max_iterations,
         "configurable": {"thread_id": f"{supervisor_thread}:planner"},
+        "callbacks": (config or {}).get("callbacks", []),
     }
 
     retry_limit = _settings.subagent_output_retry_number_on_validation_fail

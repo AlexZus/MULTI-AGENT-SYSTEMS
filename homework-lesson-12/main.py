@@ -4,13 +4,18 @@ import json
 import uuid
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Interrupt
+from langfuse import get_client, observe, propagate_attributes
+from langfuse.langchain import CallbackHandler
 
 from agents.middleware import _tool_budget
 from config import Settings
 from supervisor import create_supervisor
 
 _settings = Settings()
+_langfuse = get_client()
+_langfuse_handler = CallbackHandler()
 
 # ── Pretty-printing helpers ────────────────────────────────────────────────────
 
@@ -144,6 +149,11 @@ def main() -> None:
 
     supervisor = create_supervisor()
 
+    # One stable session for the whole REPL run
+    session_id = f"mas-session-{uuid.uuid4().hex[:8]}"
+    user_id = "homework-12-user"
+    print(f"[Langfuse session: {session_id}]")
+
     while True:
         try:
             user_input = input("\nYou: ").strip()
@@ -159,18 +169,34 @@ def main() -> None:
 
         # New thread per conversation turn
         thread_id = str(uuid.uuid4())
-        config = {"configurable": {"thread_id": thread_id}}
+        config: RunnableConfig = {
+            "configurable": {"thread_id": thread_id},
+            "callbacks": [_langfuse_handler],
+        }
         input_data = {"messages": [{"role": "user", "content": user_input}]}
 
         print(f"\n[Supervisor starting — thread {thread_id[:8]}]")
 
-        token = _tool_budget.set({"remaining": _settings.max_iterations})
-        try:
-            interrupted, interrupts = _stream_until_interrupt(supervisor, input_data, config)
-            if interrupted:
-                _handle_hitl(supervisor, interrupts, config)
-        finally:
-            _tool_budget.reset(token)
+        @observe(name="mas-run")
+        def run_turn() -> None:
+            with propagate_attributes(
+                session_id=session_id,
+                user_id=user_id,
+                tags=["multi-agent", "research", "homework-12"],
+                metadata={"thread_id": thread_id, "query": user_input[:120]},
+            ):
+                token = _tool_budget.set({"remaining": _settings.max_iterations})
+                try:
+                    interrupted, interrupts = _stream_until_interrupt(supervisor, input_data, config)
+                    if interrupted:
+                        _handle_hitl(supervisor, interrupts, config)
+                finally:
+                    _tool_budget.reset(token)
+
+        run_turn()
+
+        # Flush any pending spans
+        _langfuse.flush()
 
         # Print final supervisor message if present
         try:

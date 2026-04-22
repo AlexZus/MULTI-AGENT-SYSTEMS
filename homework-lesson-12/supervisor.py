@@ -8,7 +8,7 @@ from agents.critic import critique
 from agents.middleware import BudgetMiddleware, InvalidToolCallRetryMiddleware
 from agents.planner import plan
 from agents.research import research
-from config import Settings, SUPERVISOR_SYSTEM_PROMPT, get_model
+from config import Settings, get_supervisor_prompt, get_model
 from tools import save_report
 
 _settings = Settings()
@@ -19,7 +19,7 @@ def create_supervisor():
     return create_agent(
         get_model(),
         tools=[plan, research, critique, save_report],
-        system_prompt=SUPERVISOR_SYSTEM_PROMPT,
+        system_prompt=get_supervisor_prompt(),
         middleware=[
             BudgetMiddleware(),
             InvalidToolCallRetryMiddleware(

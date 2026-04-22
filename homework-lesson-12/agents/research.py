@@ -9,7 +9,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
 
 from agents.middleware import BudgetMiddleware, InvalidToolCallRetryMiddleware, _tool_budget
-from config import Settings, get_model, RESEARCHER_SYSTEM_PROMPT
+from config import Settings, get_model, get_researcher_prompt
 from tools import knowledge_search, web_fetch, web_search
 
 _settings = Settings()
@@ -17,7 +17,7 @@ _settings = Settings()
 _research_agent = create_agent(
     get_model(),
     tools=[web_search, web_fetch, knowledge_search],
-    system_prompt=RESEARCHER_SYSTEM_PROMPT,
+    system_prompt=get_researcher_prompt(),
     checkpointer=InMemorySaver(),
     middleware=[
         BudgetMiddleware(),
@@ -46,6 +46,7 @@ def research(request: str | dict, config: RunnableConfig = None) -> str:
     sub_config: RunnableConfig = {
         "recursion_limit": _settings.max_iterations,
         "configurable": {"thread_id": f"{supervisor_thread}:researcher"},
+        "callbacks": (config or {}).get("callbacks", []),
     }
 
     token = _tool_budget.set({"remaining": _settings.max_iterations})
