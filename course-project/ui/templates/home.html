@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Dev Team — Projects{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Projects</h1>
+  <button class="btn btn-primary btn-sm" onclick="document.getElementById('new-project-form').style.display=''">+ New Project</button>
+</div>
+
+<div id="new-project-form" style="display:none" class="card" style="max-width:480px">
+  <h2>Create Project</h2>
+  <form method="POST" action="/projects" style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap">
+    <div style="flex:1">
+      <label>Project name (alphanumeric + hyphens)</label>
+      <input type="text" name="project_name" placeholder="my-project" pattern="[a-zA-Z0-9\-]+" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Create</button>
+    <button type="button" class="btn btn-ghost" onclick="document.getElementById('new-project-form').style.display='none'">Cancel</button>
+  </form>
+</div>
+
+{% if projects %}
+<div class="project-grid">
+  {% for p in projects %}
+  <a href="/projects/{{ p.name }}" class="project-card">
+    <h3>{{ p.name }}</h3>
+    <div class="meta">
+      <span>{{ p.tasks_count }} task{{ 's' if p.tasks_count != 1 else '' }}</span>
+      {% if p.last_activity %}
+      · <span>{{ p.last_activity.strftime('%Y-%m-%d') }}</span>
+      {% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div style="color:var(--text-muted);padding:3rem;text-align:center">
+  No projects yet — create one to get started.
+</div>
+{% endif %}
+{% endblock %}

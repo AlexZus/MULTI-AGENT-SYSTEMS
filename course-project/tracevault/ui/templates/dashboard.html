@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — TraceVault{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Real-time Dashboard</h1>
+  <button class="btn btn-ghost btn-sm" id="pause-btn" onclick="togglePause()">⏸ Pause</button>
+</div>
+
+<div id="status-bar" style="margin-bottom:1rem;font-size:.8rem;color:var(--text-muted)">
+  Connecting to event stream…
+</div>
+
+<h2>Live Feed</h2>
+<div id="live-feed" style="min-height:4rem;margin-bottom:1.5rem"></div>
+
+<h2>Recent (last 1 h)</h2>
+<div id="history-feed">
+  {% for t in recent %}
+  <div class="live-row">
+    <code style="font-size:.8rem">{{ t.trace_id[:8] }}</code>
+    <span style="color:var(--text-muted)">{{ t.project_name }}</span>
+    <span class="truncate" style="max-width:300px">{{ t.user_story }}</span>
+    <span class="badge badge-{{ t.status }}">{{ t.status }}</span>
+    <span style="color:var(--text-muted);font-size:.8rem">{{ t.total_tokens }} tokens</span>
+  </div>
+  {% else %}
+  <div style="color:var(--text-muted)">No recent activity.</div>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/dashboard.js"></script>
+{% endblock %}

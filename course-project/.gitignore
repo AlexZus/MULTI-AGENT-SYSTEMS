@@ -1,0 +1,11 @@
+homework_as_examples/
+lessons_for_best_practice/
+.idea/
+.claude/
+.venv/
+.metadata/project_task_files
+.env
+rag_docs/.index/
+workspace/
+tasks_state/
+tests/tasks_state/

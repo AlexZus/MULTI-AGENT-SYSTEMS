@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ project_name }} — Dev Team{% endblock %}
+
+{% block content %}
+<div class="breadcrumb"><a href="/">Projects</a> / {{ project_name }}</div>
+<div class="page-header">
+  <h1>{{ project_name }}</h1>
+  <a href="{{ tracevault_url }}/?project_name={{ project_name }}" target="_blank" class="btn btn-ghost btn-sm">View in TraceVault ↗</a>
+</div>
+
+<div class="two-col">
+  <!-- Submit task panel -->
+  <div>
+    <h2>Submit New Task</h2>
+    <form method="POST" action="/projects/{{ project_name }}/tasks">
+      <label>Describe your task (user story)</label>
+      <textarea name="user_story" rows="5" placeholder="As a user, I want to…" required style="margin-bottom:.75rem"></textarea>
+      <button type="submit" class="btn btn-primary">▶ Start</button>
+    </form>
+  </div>
+
+  <!-- Recent tasks -->
+  <div>
+    <h2>Recent Tasks</h2>
+    {% if tasks %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Task ID</th><th>Story</th><th>Status</th><th>Created</th></tr>
+        </thead>
+        <tbody id="tasks-body">
+          {% for t in tasks %}
+          <tr class="clickable" onclick="location.href='/projects/{{ project_name }}/tasks/{{ t.task_id }}'"
+              data-task="{{ t.task_id }}" data-status="{{ t.status }}">
+            <td><code>{{ t.task_id[:8] }}</code></td>
+            <td class="truncate">{{ t.user_story }}</td>
+            <td><span class="badge badge-{{ t.status }}">{{ t.status }}</span></td>
+            <td>{{ t.created_at.strftime('%m-%d %H:%M') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:.5rem"><a href="/projects/{{ project_name }}/tasks" style="color:var(--accent);font-size:.85rem">View all tasks →</a></div>
+    {% else %}
+    <div style="color:var(--text-muted)">No tasks yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshRunning() {
+  const runningRows = document.querySelectorAll('#tasks-body tr[data-status="running"], #tasks-body tr[data-status="waiting_hitl"]');
+  if (!runningRows.length) return;
+  fetch('/projects/{{ project_name }}/tasks?format=json')
+    .then(r => r.json())
+    .then(tasks => {
+      tasks.forEach(t => {
+        const row = document.querySelector(`tr[data-task="${t.task_id}"]`);
+        if (row) {
+          const badge = row.querySelector('td:nth-child(3) span');
+          badge.className = 'badge badge-' + t.status;
+          badge.textContent = t.status;
+          row.dataset.status = t.status;
+        }
+      });
+    });
+}
+setInterval(refreshRunning, 5000);
+</script>
+{% endblock %}

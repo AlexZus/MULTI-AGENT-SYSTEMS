@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Tasks — {{ project_name }}{% endblock %}
+
+{% block content %}
+<div class="breadcrumb"><a href="/">Projects</a> / <a href="/projects/{{ project_name }}">{{ project_name }}</a> / Tasks</div>
+<div class="page-header"><h1>All Tasks — {{ project_name }}</h1></div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Task ID</th><th>User Story</th><th>Status</th><th>Verdict</th><th>QA Iters</th><th>Created</th></tr>
+    </thead>
+    <tbody>
+      {% for t in tasks %}
+      <tr class="clickable" onclick="location.href='/projects/{{ project_name }}/tasks/{{ t.task_id }}'">
+        <td><code>{{ t.task_id[:8] }}</code></td>
+        <td class="truncate">{{ t.user_story }}</td>
+        <td><span class="badge badge-{{ t.status }}">{{ t.status }}</span></td>
+        <td>{% if t.verdict %}<span class="badge badge-{{ t.verdict }}">{{ t.verdict }}</span>{% else %}—{% endif %}</td>
+        <td>{{ t.qa_iteration or '—' }}</td>
+        <td>{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:2rem">No tasks yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

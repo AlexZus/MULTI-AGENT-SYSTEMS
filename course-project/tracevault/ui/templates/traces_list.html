@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Traces — TraceVault{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Traces</h1>
+</div>
+
+<div class="filter-bar" id="filter-bar">
+  <select id="f-status" onchange="applyFilters()">
+    <option value="">All statuses</option>
+    <option value="running">Running</option>
+    <option value="waiting_hitl">Waiting HITL</option>
+    <option value="completed">Completed</option>
+    <option value="failed">Failed</option>
+  </select>
+  <select id="f-agent" onchange="applyFilters()">
+    <option value="">All agents</option>
+    <option value="ba">BA</option>
+    <option value="developer">Developer</option>
+    <option value="qa">QA</option>
+  </select>
+  <select id="f-project" onchange="applyFilters()">
+    <option value="">All projects</option>
+    {% for p in projects %}
+    <option value="{{ p }}">{{ p }}</option>
+    {% endfor %}
+  </select>
+  <input type="text" id="f-search" placeholder="Search user story…" oninput="applyFilters()" style="max-width:260px">
+</div>
+
+<div class="table-wrap">
+  <table id="traces-table">
+    <thead>
+      <tr>
+        <th>Trace ID</th>
+        <th>Project</th>
+        <th>Session</th>
+        <th>User Story</th>
+        <th>Status</th>
+        <th>Total Tokens</th>
+        <th>Spans</th>
+        <th>Timestamp</th>
+      </tr>
+    </thead>
+    <tbody id="traces-body">
+      {% for t in traces %}
+      <tr class="clickable" onclick="location.href='/traces/{{ t.trace_id }}'"
+          data-status="{{ t.status }}" data-project="{{ t.project_name }}"
+          data-story="{{ t.user_story | lower }}">
+        <td><code>{{ t.trace_id[:8] }}</code></td>
+        <td>{{ t.project_name }}</td>
+        <td><code>{{ t.session_id[:8] }}</code></td>
+        <td class="truncate">{{ t.user_story }}</td>
+        <td><span class="badge badge-{{ t.status }}">{{ t.status }}</span></td>
+        <td>{{ t.total_tokens }}</td>
+        <td>{{ t.spans | length }}</td>
+        <td>{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:2rem">No traces yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function applyFilters() {
+  const status  = document.getElementById('f-status').value;
+  const project = document.getElementById('f-project').value;
+  const agent   = document.getElementById('f-agent').value;
+  const search  = document.getElementById('f-search').value.toLowerCase();
+  document.querySelectorAll('#traces-body tr[data-status]').forEach(row => {
+    const ok = (!status  || row.dataset.status  === status)
+            && (!project || row.dataset.project === project)
+            && (!search  || row.dataset.story.includes(search));
+    row.style.display = ok ? '' : 'none';
+  });
+}
+
+// Auto-refresh rows with status=running every 5s
+function refreshRunning() {
+  const running = document.querySelectorAll('#traces-body tr[data-status="running"]');
+  if (running.length === 0) return;
+  fetch('/api/traces?status=running&limit=100')
+    .then(r => r.json())
+    .then(traces => {
+      traces.forEach(t => {
+        const row = document.querySelector(`tr[onclick*="${t.trace_id}"]`);
+        if (row) {
+          row.querySelector('td:nth-child(5) span').className = 'badge badge-' + t.status;
+          row.querySelector('td:nth-child(5) span').textContent = t.status;
+          row.dataset.status = t.status;
+          row.querySelector('td:nth-child(6)').textContent = t.total_tokens;
+        }
+      });
+    });
+}
+setInterval(refreshRunning, 5000);
+</script>
+{% endblock %}

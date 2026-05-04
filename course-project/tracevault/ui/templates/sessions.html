@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Sessions — TraceVault{% endblock %}
+
+{% block content %}
+<div class="page-header"><h1>Sessions</h1></div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Session ID</th>
+        <th>Project</th>
+        <th>Traces</th>
+        <th>Total Tokens</th>
+        <th>Success Rate</th>
+        <th>Last Activity</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sessions %}
+      <tr class="clickable" onclick="location.href='/?session_id={{ s.session_id }}'">
+        <td><code>{{ s.session_id[:12] }}</code></td>
+        <td>{{ s.project_name }}</td>
+        <td>{{ s.traces_count }}</td>
+        <td>{{ s.total_tokens }}</td>
+        <td>
+          <div class="score-bar">
+            <div class="bar"><div class="fill" style="width:{{ (s.success_rate*100)|round|int }}%;background:var(--green)"></div></div>
+            <span>{{ (s.success_rate*100)|round|int }}%</span>
+          </div>
+        </td>
+        <td>{{ s.last_activity.strftime('%Y-%m-%d %H:%M') if s.last_activity else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:2rem">No sessions yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

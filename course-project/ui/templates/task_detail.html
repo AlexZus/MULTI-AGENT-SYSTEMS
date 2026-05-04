@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}Task {{ task.task_id[:8] }} — {{ project_name }}{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <a href="/">Projects</a> /
+  <a href="/projects/{{ project_name }}">{{ project_name }}</a> /
+  Task {{ task.task_id[:8] }}
+</div>
+
+<!-- Pipeline progress bar -->
+<div class="pipeline-progress" style="margin-bottom:1.25rem">
+  <div class="pipeline-step {% if task.status in ('running', 'waiting_hitl', 'completed', 'failed') %}done{% else %}pending{% endif %}" id="step-ba">
+    {% if task.status == 'running' and task.current_phase == 'ba' %}<span class="spinner"></span>{% elif task.status != 'running' or task.spec %}✓{% endif %}
+    BA
+  </div>
+  <span class="pipeline-arrow">→</span>
+  <div class="pipeline-step {% if task.status == 'waiting_hitl' %}active{% elif task.hitl_approved %}done{% else %}pending{% endif %}" id="step-hitl">
+    {% if task.hitl_approved %}✓{% endif %}
+    Approval
+  </div>
+  <span class="pipeline-arrow">→</span>
+  <div class="pipeline-step {% if task.current_phase == 'developer' %}active{% elif task.status == 'completed' %}done{% else %}pending{% endif %}" id="step-dev">
+    {% if task.status == 'completed' %}✓{% elif task.current_phase == 'developer' %}<span class="spinner"></span>{% endif %}
+    Developer
+  </div>
+  <span class="pipeline-arrow">→</span>
+  <div class="pipeline-step {% if task.current_phase == 'qa' %}active{% elif task.status == 'completed' %}done{% else %}pending{% endif %}" id="step-qa">
+    {% if task.status == 'completed' %}✓{% elif task.current_phase == 'qa' %}
+      <span class="spinner"></span>
+      {% if task.qa_iteration %} ({{ task.qa_iteration }}/5){% endif %}
+    {% endif %}
+    QA
+  </div>
+  <span class="pipeline-arrow">→</span>
+  <div class="pipeline-step {% if task.status == 'completed' %}done{% else %}pending{% endif %}" id="step-done">
+    {% if task.status == 'completed' %}✓{% endif %}
+    Done
+  </div>
+</div>
+
+<div style="color:var(--text-muted);font-size:.85rem;margin-bottom:1rem">{{ task.user_story }}</div>
+
+<!-- State A/C: Running -->
+{% if task.status == 'running' %}
+<div class="card" id="running-panel">
+  <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem">
+    <span class="spinner"></span>
+    <strong>
+      {% if task.current_phase == 'ba' %}Business Analyst is researching your task…
+      {% elif task.current_phase == 'developer' %}Developer is implementing…
+      {% elif task.current_phase == 'qa' %}QA is reviewing{% if task.qa_iteration %} (iteration {{ task.qa_iteration }}/5){% endif %}…
+      {% else %}Processing…{% endif %}
+    </strong>
+  </div>
+  <div class="event-log" id="event-log"></div>
+</div>
+
+<!-- State B: Waiting HITL -->
+{% elif task.status == 'waiting_hitl' %}
+<div id="spec-section" class="spec-card">
+  <h2>Specification — awaiting your approval</h2>
+  {% if task.spec %}
+  <h3 style="margin-bottom:.5rem">{{ task.spec.title }}</h3>
+  <div style="margin-bottom:.75rem">
+    <strong>Complexity:</strong>
+    <span class="badge badge-{{ task.spec.estimated_complexity }}">{{ task.spec.estimated_complexity }}</span>
+  </div>
+  <div style="margin-bottom:.75rem">
+    <strong>Requirements:</strong>
+    <ol style="padding-left:1.2rem;margin-top:.3rem">
+      {% for r in task.spec.requirements %}
+      <li>{{ r }}</li>
+      {% endfor %}
+    </ol>
+  </div>
+  <div>
+    <strong>Acceptance Criteria:</strong>
+    <ol style="padding-left:1.2rem;margin-top:.3rem">
+      {% for c in task.spec.acceptance_criteria %}
+      <li>{{ c }}</li>
+      {% endfor %}
+    </ol>
+  </div>
+  {% if task.spec.notes %}
+  <div style="margin-top:.75rem;color:var(--text-muted);font-size:.85rem">Notes: {{ task.spec.notes }}</div>
+  {% endif %}
+  {% endif %}
+</div>
+
+<div style="display:flex;gap:.75rem;align-items:flex-start;flex-wrap:wrap" id="hitl-controls">
+  <button class="btn btn-success" id="approve-btn" onclick="approve()">✓ Approve &amp; Continue</button>
+  <button class="btn btn-danger btn-sm" onclick="toggleFeedback()">✗ Request Changes</button>
+</div>
+<div id="feedback-section" style="display:none;margin-top:.75rem">
+  <label>Feedback for the Business Analyst</label>
+  <textarea id="feedback-text" rows="4" placeholder="Describe what needs to change…" style="margin-bottom:.5rem"></textarea>
+  <button class="btn btn-danger btn-sm" onclick="reject()">Submit Feedback</button>
+</div>
+
+<!-- State D: Completed -->
+{% elif task.status == 'completed' %}
+<div class="card" style="margin-bottom:1rem">
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <span class="badge badge-{{ task.verdict or 'completed' }}">{{ task.verdict or 'COMPLETED' }}</span>
+    {% if task.review %}
+    <span>QA Score: <strong>{{ "%.2f" | format(task.review.score) }}</strong></span>
+    <span style="color:var(--text-muted)">QA iterations: {{ task.qa_iteration or 1 }}</span>
+    {% endif %}
+    <a href="/projects/{{ project_name }}/tasks/{{ task.task_id }}/download" class="btn btn-ghost btn-sm">⬇ Download ZIP</a>
+    {% if task.trace_id %}
+    <a href="{{ tracevault_url }}/traces/{{ task.trace_id }}" target="_blank" class="btn btn-ghost btn-sm">View Trace ↗</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if file_contents %}
+<div class="tab-bar" id="tab-bar">
+  {% for fname, _ in file_contents %}
+  <button class="tab-btn {% if loop.first %}active{% endif %}" onclick="showTab('tab-{{ loop.index0 }}', this)">
+    {{ fname.split('/')[-1] }}
+  </button>
+  {% endfor %}
+</div>
+{% for fname, content in file_contents %}
+<div class="tab-content {% if loop.first %}active{% endif %}" id="tab-{{ loop.index0 }}">
+  <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:.4rem">{{ fname }}</div>
+  <pre class="code-block">{{ content }}</pre>
+</div>
+{% endfor %}
+{% endif %}
+
+<!-- State: Failed -->
+{% elif task.status == 'failed' %}
+<div class="card">
+  <span style="color:var(--red)">✗ Pipeline failed</span>
+  {% if task.error %}<div style="margin-top:.5rem;color:var(--text-muted)">{{ task.error }}</div>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const taskId = "{{ task.task_id }}";
+const projectName = "{{ project_name }}";
+const taskStatus = "{{ task.status }}";
+
+function showTab(id, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function toggleFeedback() {
+  const s = document.getElementById('feedback-section');
+  s.style.display = s.style.display === 'none' ? '' : 'none';
+}
+
+async function approve() {
+  const btn = document.getElementById('approve-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  await fetch(`/projects/${projectName}/tasks/${taskId}/approve`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({approved: true}),
+  });
+  location.reload();
+}
+
+async function reject() {
+  const feedback = document.getElementById('feedback-text').value.trim();
+  if (!feedback) return;
+  document.getElementById('hitl-controls').innerHTML = '<span class="spinner"></span> Processing…';
+  await fetch(`/projects/${projectName}/tasks/${taskId}/approve`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({approved: false, feedback}),
+  });
+  location.reload();
+}
+
+// SSE live event log for running tasks
+if (taskStatus === 'running' || taskStatus === 'waiting_hitl') {
+  const log = document.getElementById('event-log');
+  const es = new EventSource(`/projects/${projectName}/tasks/${taskId}/events`);
+
+  function addLog(msg, cls='entry') {
+    if (!log) return;
+    const div = document.createElement('div');
+    div.className = 'entry ' + cls;
+    div.textContent = msg;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  es.onmessage = (e) => {
+    let ev;
+    try { ev = JSON.parse(e.data); } catch { return; }
+    if (ev.type === 'phase_started') {
+      addLog(`▶ Phase: ${ev.phase}`, 'phase');
+    } else if (ev.type === 'tool_call') {
+      addLog(`  🔧 ${ev.data.tool}(${JSON.stringify(ev.data.args).substring(0, 80)})`, 'tool');
+    } else if (ev.type === 'hitl_waiting') {
+      es.close();
+      location.reload();
+    } else if (ev.type === 'completed' || ev.type === 'failed') {
+      es.close();
+      setTimeout(() => location.reload(), 500);
+    }
+  };
+
+  // Also poll for status changes
+  setInterval(async () => {
+    const r = await fetch(`/projects/${projectName}/tasks/${taskId}?format=json`);
+    if (r.ok) {
+      const t = await r.json();
+      if (t.status !== taskStatus) location.reload();
+    }
+  }, 5000);
+}
+</script>
+{% endblock %}

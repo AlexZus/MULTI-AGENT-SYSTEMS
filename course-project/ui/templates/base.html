@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Dev Team{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/" class="nav-brand">Dev Team</a>
+    <div class="nav-links">
+      <a href="/" {% if active == 'home' %}class="active"{% endif %}>Projects</a>
+      <a href="{{ tracevault_url }}" target="_blank" style="color:var(--text-muted)">TraceVault ↗</a>
+    </div>
+  </nav>
+  {% if service_warnings %}
+  <div style="padding: .5rem 1.5rem 0">
+    <div class="service-banner">⚠ Some services are unavailable: {{ service_warnings | join(', ') }}</div>
+  </div>
+  {% endif %}
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

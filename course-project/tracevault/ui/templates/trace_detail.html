@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Trace {{ trace.trace_id[:8] }} — TraceVault{% endblock %}
+
+{% block content %}
+<div class="breadcrumb"><a href="/">Traces</a> / {{ trace.trace_id[:8] }}</div>
+
+<div class="card">
+  <div style="display:flex;gap:1.5rem;flex-wrap:wrap">
+    <div><span style="color:var(--text-muted)">Project</span><br><strong>{{ trace.project_name }}</strong></div>
+    <div><span style="color:var(--text-muted)">Session</span><br><code>{{ trace.session_id[:12] }}</code></div>
+    <div><span style="color:var(--text-muted)">Status</span><br><span class="badge badge-{{ trace.status }}">{{ trace.status }}</span></div>
+    <div><span style="color:var(--text-muted)">Total Tokens</span><br><strong>{{ trace.total_tokens }}</strong></div>
+    <div><span style="color:var(--text-muted)">Spans</span><br><strong>{{ trace.spans | length }}</strong></div>
+    <div><span style="color:var(--text-muted)">Created</span><br>{{ trace.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+  </div>
+  {% if trace.user_story %}
+  <div style="margin-top:.75rem;color:var(--text-muted)">User Story</div>
+  <div style="margin-top:.25rem">{{ trace.user_story }}</div>
+  {% endif %}
+</div>
+
+<h2>Spans</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Agent</th>
+        <th>Iter</th>
+        <th>Input Tokens</th>
+        <th>Output Tokens</th>
+        <th>Latency ms</th>
+        <th>Tool Calls</th>
+        <th>Timestamp</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for span in trace.spans %}
+      <tr class="span-row level-1">
+        <td>{{ span.agent_name }}</td>
+        <td>{{ span.iteration }}</td>
+        <td>{{ span.input_tokens }}</td>
+        <td>{{ span.output_tokens }}</td>
+        <td>{{ span.latency_ms }}</td>
+        <td>{{ span.tool_calls | length }}</td>
+        <td>{{ span.timestamp.strftime('%H:%M:%S') }}</td>
+        <td>
+          <button class="btn btn-ghost btn-sm" onclick="toggleSpan('span-{{ loop.index0 }}')">Detail</button>
+        </td>
+      </tr>
+      <tr id="span-{{ loop.index0 }}" style="display:none">
+        <td colspan="8" style="padding:0 1rem 1rem">
+          {% if span.input_messages %}
+          <details style="margin-top:.5rem">
+            <summary>Input messages ({{ span.input_messages | length }})</summary>
+            <pre>{{ span.input_messages | tojson(indent=2) }}</pre>
+          </details>
+          {% endif %}
+          {% if span.output_message %}
+          <details style="margin-top:.5rem">
+            <summary>Output message</summary>
+            <pre>{{ span.output_message | tojson(indent=2) }}</pre>
+          </details>
+          {% endif %}
+          {% if span.tool_calls %}
+          <details open style="margin-top:.5rem">
+            <summary>Tool calls ({{ span.tool_calls | length }})</summary>
+            <div class="table-wrap" style="margin-top:.5rem">
+              <table>
+                <thead><tr><th>Tool</th><th>Args</th><th>Result (preview)</th><th>Latency ms</th></tr></thead>
+                <tbody>
+                  {% for tc in span.tool_calls %}
+                  <tr>
+                    <td><code>{{ tc.name }}</code></td>
+                    <td><pre style="max-width:300px">{{ tc.args | tojson(indent=2) }}</pre></td>
+                    <td class="truncate">{{ tc.result[:200] }}{% if tc.result | length > 200 %}…{% endif %}</td>
+                    <td>{{ tc.latency_ms }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </details>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:1.5rem">No spans recorded.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if evaluations %}
+<h2 style="margin-top:1.5rem">Evaluations</h2>
+{% for ev in evaluations %}
+<div class="card">
+  <div style="display:flex;gap:1rem;align-items:center;margin-bottom:.75rem">
+    <strong>{{ ev.agent_name }}</strong>
+    <span class="badge badge-{{ ev.verdict }}">{{ ev.verdict }}</span>
+    <span>Score: <strong>{{ "%.2f" | format(ev.overall_score) }}</strong></span>
+    <span style="color:var(--text-muted);font-size:.8rem">{{ ev.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Criterion</th><th>Passed</th><th>Score</th><th>Reasoning</th></tr></thead>
+      <tbody>
+        {% for c in ev.criteria %}
+        <tr>
+          <td>{{ c.name }}</td>
+          <td>{% if c.passed %}<span style="color:var(--green)">✓</span>{% else %}<span style="color:var(--red)">✗</span>{% endif %}</td>
+          <td>{{ "%.2f" | format(c.score) }}</td>
+          <td>{{ c.reasoning }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleSpan(id) {
+  const row = document.getElementById(id);
+  row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+</script>
+{% endblock %}

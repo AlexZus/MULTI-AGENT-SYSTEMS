@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Evaluations — TraceVault{% endblock %}
+
+{% block content %}
+<div class="page-header"><h1>Evaluations</h1></div>
+
+<!-- Per-agent stats cards -->
+<div class="stats-grid" id="stats-grid">
+  {% for s in stats %}
+  <div class="stat-card">
+    <div class="stat-label">{{ s.agent_name }}</div>
+    <div class="stat-value">{{ "%.0f" | format(s.avg_score * 100) }}<span style="font-size:1rem">%</span></div>
+    <div class="score-bar" style="margin:.3rem 0">
+      <div class="bar"><div class="fill" style="width:{{ (s.avg_score*100)|round|int }}%;background:{% if s.avg_score >= 0.7 %}var(--green){% else %}var(--red){% endif %}"></div></div>
+    </div>
+    <div style="font-size:.8rem;color:var(--text-muted)">Pass rate: {{ "%.0f" | format(s.pass_rate * 100) }}% · {{ s.count }} evals</div>
+  </div>
+  {% else %}
+  <div style="color:var(--text-muted)">No evaluations yet.</div>
+  {% endfor %}
+</div>
+
+<!-- Filters -->
+<div class="filter-bar">
+  <select id="f-agent" onchange="applyFilters()">
+    <option value="">All agents</option>
+    {% for s in stats %}<option value="{{ s.agent_name }}">{{ s.agent_name }}</option>{% endfor %}
+  </select>
+  <select id="f-session" onchange="applyFilters()">
+    <option value="">All sessions</option>
+    {% for sid in sessions %}<option value="{{ sid }}">{{ sid[:12] }}</option>{% endfor %}
+  </select>
+</div>
+
+<!-- Evaluations table -->
+<div class="table-wrap">
+  <table id="eval-table">
+    <thead>
+      <tr>
+        <th>Eval ID</th>
+        <th>Agent</th>
+        <th>Session</th>
+        <th>Score</th>
+        <th>Verdict</th>
+        <th>Timestamp</th>
+        <th>Trace</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="eval-body">
+      {% for ev in evaluations %}
+      <tr data-agent="{{ ev.agent_name }}" data-session="{{ ev.session_id }}">
+        <td><code>{{ ev.eval_id[:8] }}</code></td>
+        <td>{{ ev.agent_name }}</td>
+        <td><code>{{ ev.session_id[:8] }}</code></td>
+        <td>
+          <div class="score-bar">
+            <div class="bar"><div class="fill" style="width:{{ (ev.overall_score*100)|round|int }}%;background:{% if ev.overall_score >= 0.7 %}var(--green){% else %}var(--red){% endif %}"></div></div>
+            <span>{{ "%.2f" | format(ev.overall_score) }}</span>
+          </div>
+        </td>
+        <td><span class="badge badge-{{ ev.verdict }}">{{ ev.verdict }}</span></td>
+        <td>{{ ev.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td><a href="/traces/{{ ev.trace_id }}" style="color:var(--accent)">{{ ev.trace_id[:8] }}</a></td>
+        <td><button class="btn btn-ghost btn-sm" onclick="toggleCriteria('criteria-{{ loop.index0 }}')">Detail</button></td>
+      </tr>
+      <tr id="criteria-{{ loop.index0 }}" style="display:none">
+        <td colspan="8" style="padding:0 1rem 1rem">
+          <div class="table-wrap" style="margin-top:.5rem">
+            <table>
+              <thead><tr><th>Criterion</th><th>Passed</th><th>Score</th><th>Reasoning</th></tr></thead>
+              <tbody>
+                {% for c in ev.criteria %}
+                <tr>
+                  <td>{{ c.name }}</td>
+                  <td>{% if c.passed %}<span style="color:var(--green)">✓</span>{% else %}<span style="color:var(--red)">✗</span>{% endif %}</td>
+                  <td>{{ "%.2f" | format(c.score) }}</td>
+                  <td>{{ c.reasoning }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:2rem">No evaluations yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function applyFilters() {
+  const agent   = document.getElementById('f-agent').value;
+  const session = document.getElementById('f-session').value;
+  document.querySelectorAll('#eval-body tr[data-agent]').forEach(row => {
+    const ok = (!agent   || row.dataset.agent   === agent)
+            && (!session || row.dataset.session === session);
+    row.style.display = ok ? '' : 'none';
+    // also hide/show criteria detail row
+    const next = row.nextElementSibling;
+    if (next && next.id && next.id.startsWith('criteria-')) {
+      if (!ok) next.style.display = 'none';
+    }
+  });
+}
+
+function toggleCriteria(id) {
+  const row = document.getElementById(id);
+  row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+
+// Auto-refresh stats every 30s
+async function refreshStats() {
+  const res = await fetch('/api/evaluations/stats');
+  if (!res.ok) return;
+  const stats = await res.json();
+  const grid = document.getElementById('stats-grid');
+  if (!stats.length) return;
+  grid.innerHTML = stats.map(s => `
+    <div class="stat-card">
+      <div class="stat-label">${s.agent_name}</div>
+      <div class="stat-value">${Math.round(s.avg_score * 100)}<span style="font-size:1rem">%</span></div>
+      <div class="score-bar" style="margin:.3rem 0">
+        <div class="bar"><div class="fill" style="width:${Math.round(s.avg_score*100)}%;background:${s.avg_score >= .7 ? 'var(--green)' : 'var(--red)'}"></div></div>
+      </div>
+      <div style="font-size:.8rem;color:var(--text-muted)">Pass rate: ${Math.round(s.pass_rate*100)}% · ${s.count} evals</div>
+    </div>
+  `).join('');
+}
+setInterval(refreshStats, 30000);
+</script>
+{% endblock %}

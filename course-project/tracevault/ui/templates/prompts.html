@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Prompts — TraceVault{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Prompt Management</h1>
+  <button class="btn btn-primary btn-sm" onclick="addNew()">+ New Prompt</button>
+</div>
+
+<div id="flash"></div>
+<div id="new-prompt-card" style="display:none" class="card">
+  <h3 style="margin-bottom:.75rem">New Prompt</h3>
+  <label style="font-size:.8rem;color:var(--text-muted)">Name (slug)</label>
+  <input type="text" id="new-name" placeholder="e.g. ba_system" style="margin-bottom:.5rem">
+  <label style="font-size:.8rem;color:var(--text-muted)">Label</label>
+  <input type="text" id="new-label" placeholder="Display label" style="margin-bottom:.5rem">
+  <label style="font-size:.8rem;color:var(--text-muted)">Template</label>
+  <textarea id="new-template" rows="6" style="margin-bottom:.5rem"></textarea>
+  <div style="display:flex;gap:.5rem">
+    <button class="btn btn-primary btn-sm" onclick="saveNew()">Save</button>
+    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('new-prompt-card').style.display='none'">Cancel</button>
+  </div>
+</div>
+
+{% for p in prompts %}
+<div class="prompt-card" id="card-{{ p.name }}">
+  <div class="prompt-card-header" onclick="toggleCard('{{ p.name }}')">
+    <strong>{{ p.name }}</strong>
+    <span style="color:var(--text-muted);font-size:.8rem">{{ p.label }}</span>
+    <span class="badge" style="background:var(--surface);border:1px solid var(--border);color:var(--text-muted)">v{{ p.version }}</span>
+    <span style="flex:1"></span>
+    <span style="color:var(--text-muted);font-size:.75rem">{{ p.updated_at.strftime('%Y-%m-%d %H:%M') }}</span>
+  </div>
+  <div class="prompt-card-body" id="body-{{ p.name }}" style="display:none">
+    <div style="color:var(--text-muted);font-size:.75rem;margin-bottom:.4rem">Preview: {{ p.template[:100] }}{% if p.template | length > 100 %}…{% endif %}</div>
+    <label style="font-size:.8rem;color:var(--text-muted)">Label</label>
+    <input type="text" id="label-{{ p.name }}" value="{{ p.label }}" style="margin-bottom:.5rem">
+    <label style="font-size:.8rem;color:var(--text-muted)">Template</label>
+    <textarea id="tpl-{{ p.name }}" rows="10" style="margin-bottom:.5rem;font-family:var(--mono)">{{ p.template }}</textarea>
+    <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.75rem">
+      <button class="btn btn-primary btn-sm" onclick="savePrompt('{{ p.name }}')">Save</button>
+      <span id="saved-{{ p.name }}" style="color:var(--green);font-size:.8rem;display:none">Saved ✓ — now v<span id="ver-{{ p.name }}">{{ p.version }}</span></span>
+    </div>
+
+    {% if p.history %}
+    <details>
+      <summary style="font-size:.85rem;margin-bottom:.5rem">History ({{ p.history | length }} versions)</summary>
+      <div class="table-wrap" style="margin-top:.5rem">
+        <table>
+          <thead><tr><th>Version</th><th>Updated</th><th>Preview</th><th></th></tr></thead>
+          <tbody>
+            {% for h in p.history | reverse %}
+            <tr>
+              <td>v{{ h.version }}</td>
+              <td>{{ h.updated_at[:16] }}</td>
+              <td class="truncate">{{ h.template[:80] }}{% if h.template | length > 80 %}…{% endif %}</td>
+              <td>
+                <button class="btn btn-ghost btn-sm" onclick="rollback('{{ p.name }}', {{ h.version }})">
+                  Rollback to v{{ h.version }}
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div style="color:var(--text-muted);padding:2rem 0">No prompts yet.</div>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleCard(name) {
+  const body = document.getElementById('body-' + name);
+  body.style.display = body.style.display === 'none' ? '' : 'none';
+}
+
+function flash(msg, type='success') {
+  const el = document.getElementById('flash');
+  el.innerHTML = `<div class="flash flash-${type}">${msg}</div>`;
+  setTimeout(() => { el.innerHTML = ''; }, 3000);
+}
+
+async function savePrompt(name) {
+  const template = document.getElementById('tpl-' + name).value;
+  const label    = document.getElementById('label-' + name).value;
+  const res = await fetch('/api/prompts/' + name, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({template, label}),
+  });
+  if (res.ok) {
+    const data = await res.json();
+    document.getElementById('saved-' + name).style.display = '';
+    document.getElementById('ver-' + name).textContent = data.version;
+    setTimeout(() => { document.getElementById('saved-' + name).style.display = 'none'; }, 3000);
+  } else {
+    flash('Save failed', 'error');
+  }
+}
+
+async function rollback(name, version) {
+  if (!confirm(`Roll back "${name}" to v${version}?`)) return;
+  const res = await fetch(`/api/prompts/${name}/rollback/${version}`, {method: 'POST'});
+  if (res.ok) {
+    const data = await res.json();
+    document.getElementById('tpl-' + name).value = data.template;
+    document.getElementById('label-' + name).value = data.label;
+    flash(`Rolled back to v${version} — new version is v${data.version}`);
+    document.getElementById('ver-' + name).textContent = data.version;
+  } else {
+    flash('Rollback failed', 'error');
+  }
+}
+
+function addNew() {
+  document.getElementById('new-prompt-card').style.display = '';
+  document.getElementById('new-name').focus();
+}
+
+async function saveNew() {
+  const name = document.getElementById('new-name').value.trim();
+  const label = document.getElementById('new-label').value.trim();
+  const template = document.getElementById('new-template').value;
+  if (!name) { flash('Name is required', 'error'); return; }
+  const res = await fetch('/api/prompts/' + name, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({template, label}),
+  });
+  if (res.ok) {
+    location.reload();
+  } else {
+    flash('Save failed', 'error');
+  }
+}
+</script>
+{% endblock %}

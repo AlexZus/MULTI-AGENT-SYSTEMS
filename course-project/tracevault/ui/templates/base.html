@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}TraceVault{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/" class="nav-brand">TraceVault</a>
+    <div class="nav-links">
+      <a href="/" {% if active == 'traces' %}class="active"{% endif %}>Traces</a>
+      <a href="/sessions" {% if active == 'sessions' %}class="active"{% endif %}>Sessions</a>
+      <a href="/dashboard" {% if active == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
+      <a href="/prompts" {% if active == 'prompts' %}class="active"{% endif %}>Prompts</a>
+      <a href="/evaluations" {% if active == 'evaluations' %}class="active"{% endif %}>Evaluations</a>
+    </div>
+  </nav>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
